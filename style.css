@@ -38,6 +38,53 @@
     color: var(--dark-gray);
     background: var(--white);
 }
+
+/* Bloqueio de interação durante geração de PDF */
+body.pdf-busy {
+    overflow: hidden;
+}
+
+#pdfLoadingOverlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(2px);
+}
+
+.pdf-loading-content {
+    background: #ffffff;
+    padding: 18px 22px;
+    border-radius: 10px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-family: 'Inter', sans-serif;
+    color: #111;
+}
+
+.pdf-loading-spinner {
+    width: 22px;
+    height: 22px;
+    border: 3px solid #c9c9c9;
+    border-top-color: #11114e;
+    border-radius: 50%;
+    animation: pdfSpin 0.9s linear infinite;
+}
+
+.pdf-loading-text {
+    font-size: 0.95rem;
+    font-weight: 600;
+}
+
+@keyframes pdfSpin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
 .delegacias-list li:last-child {
     border-bottom: none;
 }

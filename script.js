@@ -6,7 +6,7 @@ const firebaseConfig = {
     apiKey: "AIzaSyDpMbzbUesMjUqtoF3UC0LpKU3t6HSkSrE",
     authDomain: "ropgma-bf685.firebaseapp.com",
     projectId: "ropgma-bf685",
-    storageBucket: "ropgma-bf685.firebasestorage.app",
+    storageBucket: "ropgma-bf685.appspot.com",
     messagingSenderId: "458706183661",
     appId: "1:458706183661:web:0e92990b3f6e31f25133e4",
     measurementId: "G-52PRVFRNFP"
@@ -37,6 +37,44 @@ let logsCache = [];
 let isLoadingLogs = false;
 let logsPageSize = 20;
 let logsCurrentPage = 1;
+let isGeneratingPdf = false;
+
+function setPdfBusy(isBusy, button = null) {
+    const existingOverlay = document.getElementById('pdfLoadingOverlay');
+    if (isBusy) {
+        if (!existingOverlay) {
+            const overlay = document.createElement('div');
+            overlay.id = 'pdfLoadingOverlay';
+            overlay.innerHTML = `
+                <div class="pdf-loading-content">
+                    <div class="pdf-loading-spinner"></div>
+                    <div class="pdf-loading-text">Gerando PDF...</div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+        }
+        document.body.classList.add('pdf-busy');
+    } else {
+        document.body.classList.remove('pdf-busy');
+        if (existingOverlay) existingOverlay.remove();
+    }
+
+    if (button) {
+        if (isBusy) {
+            button.dataset.originalText = button.innerHTML;
+            button.disabled = true;
+            button.classList.add('is-loading');
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Gerando...';
+        } else {
+            button.disabled = false;
+            button.classList.remove('is-loading');
+            if (button.dataset.originalText) {
+                button.innerHTML = button.dataset.originalText;
+                delete button.dataset.originalText;
+            }
+        }
+    }
+}
 
 let delegaciasCache = [];
 let isLoadingDelegacias = false;
@@ -1802,8 +1840,8 @@ function renderRopsList(rops) {
         const highlights = [
             { icon: 'fa-gavel', label: 'Delito', value: rop.tipoDelito || 'Não informado' },
             { icon: 'fa-location-dot', label: 'Local', value: rop.localOcorrencia || 'Não informado' },
-            { icon: 'fa-calendar-alt', label: 'Data/Hora', value: `${formatDate(rop.dataFato)} ${rop.horaFato || ''}`.trim() },
-            { icon: 'fa-building', label: 'Posto', value: rop.postoServico || 'Não informado' }
+            { icon: 'fa-calendar-alt', label: 'Data/Hora', value: `${formatDate(rop.dataFato)} ${rop.horaFato || ''}`.trim() }
+            // Removido o destaque de Posto de Serviço
         ];
 
         let matchBadge = '';
@@ -1833,7 +1871,7 @@ function renderRopsList(rops) {
             </div>
             <div class="operation-meta">
                 <div class="operation-meta-item"><strong>Natureza:</strong> ${formatNatureza(rop.natureza) || 'Não informado'}</div>
-                <div class="operation-meta-item operation-meta-highlight"><strong>Posto de serviço:</strong> ${escapeHtml(rop.postoServico || 'Não informado')}</div>
+                <div class="operation-meta-item"><strong>Posto de serviço:</strong> ${escapeHtml(rop.postoServico || 'Não informado')}</div>
                 <div class="operation-meta-item"><strong>Registrado por:</strong> ${rop.createdBy?.nomeGuerra || 'Não informado'}</div>
                 <div class="operation-meta-item"><strong>Criado em:</strong> ${formatDateTime(rop.createdAt)}</div>
                 <div class="operation-meta-item"><strong>Atualizado em:</strong> ${formatDateTime(rop.updatedAt)}</div>
@@ -1871,10 +1909,19 @@ function renderRopsList(rops) {
     });
 
     ropsList.querySelectorAll('button[data-action="pdf"]').forEach(button => {
-        button.addEventListener('click', () => {
+        button.addEventListener('click', async () => {
+            if (isGeneratingPdf) return;
             const id = button.getAttribute('data-id');
             const rop = ropsCache.find(item => item.id === id);
-            if (rop) exportToPDF(rop);
+            if (!rop) return;
+            isGeneratingPdf = true;
+            setPdfBusy(true, button);
+            try {
+                await exportToPDF(rop);
+            } finally {
+                isGeneratingPdf = false;
+                setPdfBusy(false, button);
+            }
         });
     });
 
@@ -3474,69 +3521,50 @@ async function exportToPDF(ropData) {
     sectionHeader = drawSectionHeader('II - DADOS DAS PARTES ENVOLVIDAS NA OCORRÊNCIA');
     sectionTopY = sectionHeader.headerTop;
 
-    // Partes envolvidas com espaçamento adequado
     if (ropData.partes && ropData.partes.length > 0) {
         ropData.partes.forEach((parte, index) => {
-            if (y > pageHeight - 60) { // Aumentado margem inferior
+            if (y > pageHeight - 60) {
                 drawSectionLines(sectionTopY, y);
                 addPageWithBorders();
                 y = margin;
                 sectionHeader = drawSectionHeader('II - DADOS DAS PARTES ENVOLVIDAS NA OCORRÊNCIA');
                 sectionTopY = sectionHeader.headerTop;
             }
-            
-            // Cabeçalho da parte (cinza) com espaçamento
             doc.setFillColor(180, 180, 180);
             doc.rect(margin, y, contentWidth, 6, 'F');
             doc.setFontSize(9);
             doc.setTextColor(0, 0, 0);
-            
             const roleText = `PARTE ENVOLVIDA: ${parte.role || ''}`;
             doc.text(roleText, margin + 5, y + 4);
-            y += 10; // Aumentado espaçamento após cabeçalho
-
-            // Dados da parte com quebra de linha quando necessário
+            y += 10;
             doc.setFont('helvetica', 'normal');
             doc.setFontSize(9);
-
             const colGap = 6;
             const colWidth = (contentMaxWidth - colGap) / 2;
             const leftX = contentX;
             const rightX = contentX + colWidth + colGap;
-
-            // Linha 1: Nome | Data de Nascimento
             let leftHeight = drawField(leftX, y, 'Nome:', parte.nome, colWidth);
             let rightHeight = drawField(rightX, y, 'Data de Nasc.:', parte.dataNascimento, colWidth);
             y += Math.max(leftHeight, rightHeight) + 2;
-
-            // Linha 2: Pai | Mãe
             leftHeight = drawField(leftX, y, 'Pai:', parte.pai, colWidth);
             rightHeight = drawField(rightX, y, 'Mãe:', parte.mae, colWidth);
             y += Math.max(leftHeight, rightHeight) + 2;
-
-            // Linha 3: Condição Física | Sexo
             leftHeight = drawField(leftX, y, 'Condição Física:', formatCondicaoFisica(parte.condicaoFisica), colWidth);
             rightHeight = drawField(rightX, y, 'Sexo:', formatSexo(parte.sexo), colWidth);
             y += Math.max(leftHeight, rightHeight) + 2;
-
-            // Linha 4: Naturalidade | Endereço
             leftHeight = drawField(leftX, y, 'Naturalidade:', parte.naturalidade, colWidth);
             rightHeight = drawField(rightX, y, 'Endereço:', parte.endereco, colWidth);
             y += Math.max(leftHeight, rightHeight) + 2;
-
-            // Linha 5: CPF | Cidade/UF
             leftHeight = drawField(leftX, y, 'CPF:', formatCPF(parte.cpf), colWidth);
             rightHeight = drawField(rightX, y, 'Cidade/UF:', parte.cidadeUf, colWidth);
             y += Math.max(leftHeight, rightHeight) + 2;
-
-            // Linha 6: Telefone
             leftHeight = drawField(leftX, y, 'Telefone:', formatTelefone(parte.telefone), contentMaxWidth);
-            y += leftHeight + 6; // Espaçamento entre partes
+            y += leftHeight + 6;
         });
     } else {
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(10);
-        doc.text('Não houve registro de partes envolvidas.', contentX, y);
+        doc.text('Sem envolvidos', contentX, y);
         y += 15;
     }
 
@@ -3643,7 +3671,7 @@ async function exportToPDF(ropData) {
     } else {
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(10);
-        doc.text('Não houve registro de apreensões.', contentX, y);
+        doc.text('Sem objetos apreendidos', contentX, y);
         y += 15;
     }
 
@@ -3714,7 +3742,7 @@ async function exportToPDF(ropData) {
     } else {
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(10);
-        doc.text('Não houve registro de imagens anexadas.', contentX, y);
+        doc.text('Sem imagens anexadas', contentX, y);
         y += 15;
     }
 
