@@ -1,0 +1,59 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && userDoc().tipo == 'administrador';
+    }
+
+    function isOwnerOrParticipant(rop) {
+      return userDoc().matricula != null
+        && (
+          (rop.participantMatriculas is list && rop.participantMatriculas.hasAny([userDoc().matricula]))
+          || (rop.agentesMatriculas is list && rop.agentesMatriculas.hasAny([userDoc().matricula]))
+        );
+    }
+
+    match /users/{userId} {
+      allow read: if isSignedIn() && (isAdmin() || userId == request.auth.uid);
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && (isAdmin() || userId == request.auth.uid);
+      allow delete: if isAdmin();
+    }
+
+    match /warNames/{warNameId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /delegacias/{delegaciaId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    match /rops/{ropId} {
+      allow read: if isSignedIn() && (isAdmin() || isOwnerOrParticipant(resource.data));
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && (isAdmin() || isOwnerOrParticipant(resource.data));
+      allow delete: if isAdmin();
+    }
+
+    match /counters/{counterId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /logs/{logId} {
+      allow create: if isSignedIn();
+      allow read: if isAdmin();
+      allow update, delete: if false;
+    }
+  }
+}

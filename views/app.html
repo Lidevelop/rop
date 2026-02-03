@@ -1,0 +1,836 @@
+<!-- App View -->
+<div class="app-view hidden" id="appView">
+    <!-- Header -->
+    <header>
+        <div class="logo-container">
+            <img src="logo.jpg" alt="Logo Polícia Municipal de Aracaju" class="logo-icon">
+            <div class="logo-text">
+                <h1>Polícia Municipal de Aracaju</h1>
+                <span>Gestão de Relatórios de Ocorrência (ROP)</span>
+            </div>
+        </div>
+        <div class="header-actions">
+            <div class="idle-timer" id="idleTimer" aria-live="polite">
+                Sessão expira em 10:00
+            </div>
+            <div class="save-indicator" id="saveIndicator">
+                <i class="fas fa-save"></i>
+                <span id="saveStatus">Salvo automaticamente</span>
+                <span id="lastSaved">Último salvamento: --:--:--</span>
+            </div>
+            <div class="admin-menu hidden" id="adminMenuContainer">
+                <button class="btn-small" id="adminMenuBtn" aria-haspopup="true" aria-expanded="false" title="Administração">
+                    <i class="fas fa-gear"></i>
+                </button>
+                <div class="admin-menu-dropdown hidden" id="adminMenu" role="menu">
+                    <button class="admin-menu-item" id="viewUsersBtn" role="menuitem">
+                        <i class="fas fa-users"></i>
+                        Usuários
+                    </button>
+                    <button class="admin-menu-item" id="viewWarNamesBtn" role="menuitem">
+                        <i class="fas fa-id-badge"></i>
+                        Agentes
+                    </button>
+                    <button class="admin-menu-item" id="viewLogsBtn" role="menuitem">
+                        <i class="fas fa-clipboard-list"></i>
+                        Logs
+                    </button>
+                </div>
+            </div>
+            <div class="admin-menu" id="profileMenuContainer">
+                <button class="btn-small" id="profileMenuBtn" aria-haspopup="true" aria-expanded="false" title="Meu perfil">
+                    <i class="fas fa-user-circle"></i>
+                    Meu perfil
+                </button>
+                <div class="admin-menu-dropdown hidden" id="profileMenu" role="menu">
+                    <button class="admin-menu-item" id="changePasswordBtn" role="menuitem">
+                        <i class="fas fa-key"></i>
+                        Alterar senha
+                    </button>
+                    <button class="admin-menu-item" id="logoutBtn" role="menuitem">
+                        <i class="fas fa-sign-out-alt"></i>
+                        Sair
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <div class="profile-summary-card header-profile" id="profileSummaryCard">
+        <div class="profile-summary-grid profile-summary-inline">
+            <div class="profile-summary-item">
+                <small>Classe</small>
+                <strong id="profileSummaryClass">-</strong>
+            </div>
+            <div class="profile-summary-item">
+                <small>Nome de Guerra</small>
+                <strong id="profileSummaryWarName">-</strong>
+            </div>
+            <div class="profile-summary-item">
+                <small>Matrícula</small>
+                <strong id="profileSummaryRegistration">-</strong>
+            </div>
+            <div class="profile-summary-item">
+                <small>Tipo</small>
+                <strong id="profileSummaryType">-</strong>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="idlePromptModal">
+        <div class="modal-content">
+            <h3>Sessão prestes a expirar</h3>
+            <div class="idle-modal-timer" id="idleModalTimer" aria-live="polite">05:00</div>
+            <p class="modal-helper">Faltam 5 minutos para o término da sessão. Deseja resetar o timer para mais 60 minutos?</p>
+            <div class="modal-buttons">
+                <button class="btn-action btn-save" id="idleExtendBtn">Sim, resetar</button>
+                <button class="btn-action btn-secondary" id="idleKeepBtn">Agora não</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="passwordModal">
+        <div class="modal-content modal-form">
+            <div class="modal-header">
+                <h3>Alterar senha</h3>
+                <button class="modal-close" id="closePasswordModal" aria-label="Fechar">&times;</button>
+            </div>
+            <p class="modal-helper">Para sua segurança, confirme a senha atual e defina uma nova senha.</p>
+            <form id="passwordForm" class="form-grid">
+                <div class="form-group span-3">
+                    <label for="currentPassword" class="required-label"><i class="fas fa-lock"></i> Senha atual</label>
+                    <input type="password" id="currentPassword" class="required" autocomplete="current-password">
+                </div>
+                <div class="form-group">
+                    <label for="newPassword" class="required-label"><i class="fas fa-key"></i> Nova senha</label>
+                    <input type="password" id="newPassword" class="required" autocomplete="new-password" minlength="6">
+                </div>
+                <div class="form-group">
+                    <label for="confirmNewPassword" class="required-label"><i class="fas fa-key"></i> Confirmar nova senha</label>
+                    <input type="password" id="confirmNewPassword" class="required" autocomplete="new-password" minlength="6">
+                </div>
+                <div class="form-group span-3">
+                    <div class="login-error" id="passwordError"></div>
+                </div>
+                <div class="form-group span-3">
+                    <div class="modal-buttons">
+                        <button class="btn-action btn-save" id="savePasswordBtn" type="submit">Salvar</button>
+                        <button class="btn-action btn-secondary" id="cancelPasswordBtn" type="button">Cancelar</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="modal" id="delegaciaModal">
+        <div class="modal-content modal-form">
+            <div class="modal-header">
+                <h3>Adicionar delegacia</h3>
+                <button class="modal-close" id="closeDelegaciaModal" aria-label="Fechar">&times;</button>
+            </div>
+            <p class="modal-helper">Informe o nome da delegacia para disponibilizar na lista.</p>
+            <div class="form-group">
+                <label for="delegaciaName" class="required-label"><i class="fas fa-inbox"></i> Delegacia</label>
+                <input type="text" id="delegaciaName" class="required" placeholder="Ex: 2ª Delegacia Metropolitana">
+                <div class="login-error" id="delegaciaError"></div>
+            </div>
+            <div class="delegacias-list-section">
+                <h4 style="margin: 1rem 0 0.5rem 0; font-size:1.05rem; color:var(--primary-color);">Delegacias disponíveis</h4>
+                <ul id="delegaciasList" class="delegacias-list" style="list-style:none; padding:0; margin:0; max-height:180px; overflow-y:auto;"></ul>
+            </div>
+            <div class="modal-buttons">
+                <button class="btn-action btn-save" id="saveDelegaciaBtn" type="button">Salvar</button>
+                <button class="btn-action btn-secondary" id="cancelDelegaciaBtn" type="button">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main container -->
+    <main class="container">
+        <div class="app-nav">
+            <button class="app-nav-btn" id="currentRopBtn">
+                <i class="fas fa-file-alt"></i>
+                ROP Atual
+            </button>
+            <button class="app-nav-btn" id="newRopBtn">
+                <i class="fas fa-plus-circle"></i>
+                Novo ROP
+            </button>
+            <button class="app-nav-btn" id="viewRopsBtn">
+                <i class="fas fa-list"></i>
+                ROPs Registrados
+            </button>
+        </div>
+
+        <!-- Manager View -->
+        <section class="form-section hidden" id="managerView">
+            <h2 class="section-title">
+                <i class="fas fa-clipboard-list"></i>
+                ROPs Registrados
+            </h2>
+            <div class="manager-filters">
+                <div class="form-group">
+                    <label for="filterText"><i class="fas fa-search"></i> Busca geral</label>
+                    <input type="text" id="filterText" placeholder="Registro, natureza, local, envolvidos, apreensões, relato...">
+                </div>
+                <div class="form-group">
+                    <label for="filterDateFrom"><i class="fas fa-calendar-alt"></i> Data inicial</label>
+                    <input type="date" id="filterDateFrom">
+                </div>
+                <div class="form-group">
+                    <label for="filterDateTo"><i class="fas fa-calendar-alt"></i> Data final</label>
+                    <input type="date" id="filterDateTo">
+                </div>
+                <div class="form-group">
+                    <label for="refreshRops"><i class="fas fa-sync-alt"></i> Atualizar</label>
+                    <button class="btn-action btn-export" id="refreshRops">
+                        <i class="fas fa-rotate"></i>
+                        Recarregar
+                    </button>
+                </div>
+            </div>
+            <div id="ropsList" class="operations-list"></div>
+            <div class="pagination" id="ropsPagination"></div>
+        </section>
+
+        <!-- Users View (Admin only) -->
+        <section class="form-section hidden" id="usersView">
+            <h2 class="section-title">
+                <i class="fas fa-users"></i>
+                Usuários
+            </h2>
+            <div class="action-buttons align-left">
+                <button class="btn-action btn-save" id="createUserBtn">
+                    <i class="fas fa-user-plus"></i>
+                    Novo usuário
+                </button>
+            </div>
+            <div class="table-responsive">
+                <table id="usersTable">
+                    <thead>
+                        <tr>
+                            <th>Classe</th>
+                            <th>Nome de Guerra</th>
+                            <th>E-mail</th>
+                            <th>Matrícula</th>
+                            <th>Tipo</th>
+                            <th>Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody id="usersTableBody"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- War Names View (Admin only) -->
+        <section class="form-section hidden" id="warNamesView">
+            <h2 class="section-title">
+                <i class="fas fa-id-badge"></i>
+                Agentes
+            </h2>
+            <div class="action-buttons align-left">
+                <button class="btn-action btn-save" id="createWarNameBtn">
+                    <i class="fas fa-plus"></i>
+                    Adicionar agente
+                </button>
+            </div>
+            <div class="manager-filters" id="warNamesFilters">
+                <div class="form-group">
+                    <label for="warNamesFilterText"><i class="fas fa-search"></i> Busca</label>
+                    <input type="text" id="warNamesFilterText" placeholder="Classe, nome, matrícula, status">
+                </div>
+                <div class="form-group">
+                    <label for="warNamesPageSize"><i class="fas fa-list"></i> Itens por página</label>
+                    <select id="warNamesPageSize">
+                        <option value="10">10</option>
+                        <option value="20" selected>20</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                    </select>
+                </div>
+            </div>
+            <div class="table-responsive">
+                <table id="warNamesTable">
+                    <thead>
+                        <tr>
+                            <th>Classe</th>
+                            <th>Nome de Guerra</th>
+                            <th>Matrícula</th>
+                            <th>Status</th>
+                            <th>Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody id="warNamesTableBody"></tbody>
+                </table>
+            </div>
+            <div class="pagination" id="warNamesPagination"></div>
+        </section>
+
+        <section class="form-section hidden" id="logsView">
+            <h2 class="section-title">
+                <i class="fas fa-clipboard-list"></i>
+                Logs
+            </h2>
+            <div class="manager-filters">
+                <div class="form-group">
+                    <label for="logsFilterText"><i class="fas fa-search"></i> Busca</label>
+                    <input type="text" id="logsFilterText" placeholder="Usuário, ação, ROP, matrícula...">
+                </div>
+                <div class="form-group">
+                    <label for="logsPageSize"><i class="fas fa-list"></i> Itens por página</label>
+                    <select id="logsPageSize">
+                        <option value="10">10</option>
+                        <option value="20" selected>20</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                    </select>
+                </div>
+            </div>
+            <div class="table-responsive">
+                <table id="logsTable">
+                    <thead>
+                        <tr>
+                            <th>Data/Hora</th>
+                            <th>Ação</th>
+                            <th>Usuário</th>
+                            <th>Matrícula</th>
+                            <th>ROP</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logsTableBody"></tbody>
+                </table>
+            </div>
+            <div class="pagination" id="logsPagination"></div>
+        </section>
+
+        <!-- ROP Form View -->
+        <div id="ropFormView">
+            <datalist id="warNamesList"></datalist>
+
+            <section class="form-section">
+                <h2 class="section-title">
+                    <i class="fas fa-id-card"></i>
+                    Identificação do ROP
+                </h2>
+                <div class="form-grid identificacao-grid">
+                    <div class="form-group rop-num-group">
+                        <label for="registroNumero" class="required-label"><i class="fas fa-hashtag"></i> Nº do Registro</label>
+                        <input type="hidden" id="registroNumero" class="required">
+                        <div class="readonly-value" id="registroNumeroDisplay">--</div>
+                    </div>
+                    <div class="form-group">
+                        <label for="dataFato" class="required-label"><i class="fas fa-calendar-alt"></i> Data do Fato</label>
+                        <input type="date" id="dataFato" class="required">
+                    </div>
+                    <div class="form-group">
+                        <label for="horaFato" class="required-label"><i class="fas fa-clock"></i> Hora do Fato</label>
+                        <input type="time" id="horaFato" class="required">
+                    </div>
+                    <div class="form-group">
+                        <label for="destinatario" class="required-label"><i class="fas fa-inbox"></i> Delegacia</label>
+                        <div class="inline-field">
+                            <select id="destinatario" class="required">
+                                <option value="">Selecione</option>
+                            </select>
+                            <button class="btn-action btn-save btn-inline" id="addDelegaciaBtn" type="button" title="Adicionar delegacia">
+                                <i class="fas fa-plus"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="form-section">
+                <h2 class="section-title">
+                    <i class="fas fa-map-marker-alt"></i>
+                    Dados da Ocorrência
+                </h2>
+                <div class="form-grid ocorrencia-grid">
+                    <div class="form-group">
+                        <label for="natureza"><i class="fas fa-clipboard-list"></i> Natureza</label>
+                        <select id="natureza">
+                            <option value=""></option>
+                            <option value="prisao_em_flagrante">Prisão em Flagrante</option>
+                            <option value="apreensao_em_flagrante">Apreensão em Flagrante</option>
+                            <option value="prisao_e_apreensao_em_flagrante">Prisão e Apreensão em Flagrante</option>
+                            <option value="mandado_de_prisao_em_aberto">Mandado de prisão em aberto</option>
+                            <option value="comunicado_de_fato_relevante">Comunicado de fato relevante</option>
+                            <option value="termo_circunstanciado_de_ocorrencia">Termo Circunstanciado de Ocorrência</option>
+                            <option value="outros">Outros</option>
+                        </select>
+                    </div>
+                    <div class="form-group span-2">
+                        <label for="tipoDelito"><i class="fas fa-exclamation-triangle"></i> Tipo de delito</label>
+                        <input type="text" id="tipoDelito" placeholder="Ex: Roubo, furto, etc" title="Ex: Roubo, furto, etc">
+                    </div>
+                    <div class="form-group span-2">
+                        <label for="localOcorrencia"><i class="fas fa-location-dot"></i> Local da Ocorrência</label>
+                        <input type="text" id="localOcorrencia" placeholder="Local da ocorrência">
+                    </div>
+                    <div class="form-group compact">
+                        <label for="uf"><i class="fas fa-flag"></i> UF</label>
+                        <input type="text" id="uf" value="SE" maxlength="2">
+                    </div>
+                    <div class="form-group compact">
+                        <label for="numero"><i class="fas fa-hashtag"></i> Número</label>
+                        <input type="text" id="numero" value="S/N">
+                    </div>
+                    <div class="form-group">
+                        <label for="bairro"><i class="fas fa-map"></i> Bairro</label>
+                        <select id="bairro">
+                            <option value=""></option>
+                            <option value="Aeroporto">Aeroporto</option>
+                            <option value="América">América</option>
+                            <option value="Areia Branca">Areia Branca</option>
+                            <option value="Aruana">Aruana</option>
+                            <option value="Atalaia">Atalaia</option>
+                            <option value="Bugio">Bugio</option>
+                            <option value="Capucho">Capucho</option>
+                            <option value="Centro">Centro</option>
+                            <option value="Cidade Nova">Cidade Nova</option>
+                            <option value="Cirurgia">Cirurgia</option>
+                            <option value="Coroa do Meio">Coroa do Meio</option>
+                            <option value="Dezessete de Março">Dezessete de Março</option>
+                            <option value="Dezoito do Forte">Dezoito do Forte</option>
+                            <option value="Dom Luciano">Dom Luciano</option>
+                            <option value="Farolândia">Farolândia</option>
+                            <option value="Gameleira">Gameleira</option>
+                            <option value="Getúlio Vargas">Getúlio Vargas</option>
+                            <option value="Grageru">Grageru</option>
+                            <option value="Inácio Barbosa">Inácio Barbosa</option>
+                            <option value="Industrial">Industrial</option>
+                            <option value="Jabutiana">Jabutiana</option>
+                            <option value="Japãozinho">Japãozinho</option>
+                            <option value="Jardim Centenário">Jardim Centenário</option>
+                            <option value="Jardins">Jardins</option>
+                            <option value="José Conrado de Araújo">José Conrado de Araújo</option>
+                            <option value="Lamarão">Lamarão</option>
+                            <option value="Luzia">Luzia</option>
+                            <option value="Marivan">Marivan</option>
+                            <option value="Matapoã">Matapoã</option>
+                            <option value="Mosqueiro">Mosqueiro</option>
+                            <option value="Novo Paraíso">Novo Paraíso</option>
+                            <option value="Olaria">Olaria</option>
+                            <option value="Palestina">Palestina</option>
+                            <option value="Pereira Lobo">Pereira Lobo</option>
+                            <option value="Ponto Novo">Ponto Novo</option>
+                            <option value="Porto Dantas">Porto Dantas</option>
+                            <option value="Robalo">Robalo</option>
+                            <option value="Salgado Filho">Salgado Filho</option>
+                            <option value="Santa Maria">Santa Maria</option>
+                            <option value="Santo Antônio">Santo Antônio</option>
+                            <option value="Santos Dumont">Santos Dumont</option>
+                            <option value="São Conrado">São Conrado</option>
+                            <option value="São José">São José</option>
+                            <option value="São José dos Náufragos">São José dos Náufragos</option>
+                            <option value="Siqueira Campos">Siqueira Campos</option>
+                            <option value="Soledade">Soledade</option>
+                            <option value="Suíssa">Suíssa</option>
+                            <option value="Treze de Julho">Treze de Julho</option>
+                            <option value="Bairro de outra cidade">Bairro de outra cidade</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="cidade"><i class="fas fa-city"></i> Cidade</label>
+                        <input type="text" id="cidade" value="Aracaju">
+                    </div>
+                </div>
+            </section>
+
+            <section class="form-section">
+                <h2 class="section-title">
+                    <i class="fas fa-user-tie"></i>
+                    Partes Envolvidas
+                </h2>
+                <p class="section-helper">Cadastre todas as partes envolvidas na ocorrência.</p>
+                <label class="empty-flag operation-empty" id="noPartesFlagWrapper" style="display:block;">
+                    <input type="checkbox" id="noPartesFlag">
+                    Não houve envolvidos
+                </label>
+                <div id="partesList" class="parte-list"></div>
+                <button class="btn-add-row" id="addParteBtn">
+                    <i class="fas fa-user-plus"></i>
+                    Adicionar parte envolvida
+                </button>
+            </section>
+
+            <section class="form-section">
+                <h2 class="section-title">
+                    <i class="fas fa-box"></i>
+                    Apreensões
+                </h2>
+                <label class="empty-flag operation-empty" id="noApreensoesFlagWrapper" style="display:block;">
+                    <input type="checkbox" id="noApreensoesFlag">
+                    Não houve apreensões
+                </label>
+                <div id="apreensoesEmpty" class="operation-empty">Nenhuma apreensão adicionada.</div>
+                <div class="table-responsive hidden" id="apreensoesContainer">
+                    <table id="apreensoesTable">
+                        <thead>
+                            <tr>
+                                <th>Tipo</th>
+                                <th>Especificação</th>
+                                <th>Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="apreensoesTableBody"></tbody>
+                    </table>
+                </div>
+                <button class="btn-add-row" id="addApreensaoBtn">
+                    <i class="fas fa-plus"></i>
+                    Adicionar apreensão
+                </button>
+            </section>
+
+            <section class="form-section">
+                <h2 class="section-title">
+                    <i class="fas fa-users"></i>
+                    Agentes Envolvidos na Ocorrência
+                </h2>
+                <div id="agentesEmpty" class="operation-empty">Adicione pelo menos um agente.</div>
+                <div class="table-responsive hidden" id="agentesContainer">
+                    <table id="agentesTable">
+                        <thead>
+                            <tr>
+                                <th>Classe</th>
+                                <th>Nome de Guerra</th>
+                                <th>Matrícula</th>
+                                <th>Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="agentesTableBody"></tbody>
+                    </table>
+                </div>
+                <button class="btn-add-row" id="addAgenteBtn">
+                    <i class="fas fa-user-plus"></i>
+                    Adicionar agente
+                </button>
+            </section>
+
+            <section class="form-section" id="postoServicoSection">
+                <h2 class="section-title">
+                    <i class="fas fa-building"></i>
+                    Posto de Serviço
+                </h2>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="postoServico" class="required-label"><i class="fas fa-building"></i> Posto de Serviço</label>
+                        <input type="text" id="postoServico" class="required" placeholder="Posto de serviço">
+                    </div>
+                    <div class="form-group">
+                        <label for="turno" class="required-label"><i class="fas fa-clock"></i> Plantão</label>
+                        <input type="text" id="turno" class="required" placeholder="Ex: Plantão A">
+                    </div>
+                </div>
+            </section>
+
+            <section class="form-section">
+                <h2 class="section-title">
+                    <i class="fas fa-paperclip"></i>
+                    Imagens / Anexos
+                </h2>
+                <label class="empty-flag operation-empty" id="noAnexosFlagWrapper" style="display:block;">
+                    <input type="checkbox" id="noAnexosFlag">
+                    Não houve anexos
+                </label>
+                <div id="anexosEmpty" class="operation-empty">Nenhum anexo adicionado.</div>
+                <div id="anexosContainer" class="hidden">
+                    <div class="form-group">
+                        <label><i class="fas fa-image"></i> Imagens anexadas</label>
+                        <small class="field-hint">As imagens serão enviadas somente após registrar o ROP.</small>
+                    </div>
+                    <input type="file" id="anexosFileInput" accept="image/*" class="hidden" />
+                    <div id="anexosUploadsList" class="uploads-list"></div>
+                </div>
+                <button class="btn-add-row" id="addAnexosBtn">
+                    <i class="fas fa-plus"></i>
+                    Adicionar anexos
+                </button>
+            </section>
+
+            <section class="form-section">
+                <h2 class="section-title">
+                    <i class="fas fa-align-left"></i>
+                    Relato da Ocorrência
+                </h2>
+                <div class="form-group">
+                    <label for="relato" class="required-label"><i class="fas fa-pen"></i> Relato</label>
+                    <textarea id="relato" class="required" placeholder="Descreva detalhadamente a ocorrência"></textarea>
+                </div>
+            </section>
+
+            <div class="action-buttons">
+                <button class="btn-action btn-save" id="saveDbBtn">
+                    <i class="fas fa-cloud-upload-alt"></i>
+                    Registrar ROP
+                </button>
+                <button class="btn-action btn-clear" id="clearBtn">
+                    <i class="fas fa-trash-alt"></i>
+                    Limpar Formulário
+                </button>
+            </div>
+        </div>
+    </main>
+
+    <!-- Confirmation Modal -->
+    <div class="modal" id="confirmationModal">
+        <div class="modal-content">
+            <h3>Confirmar Limpeza</h3>
+            <p>Tem certeza que deseja limpar todos os dados do formulário? Esta ação não pode ser desfeita.</p>
+            <div class="modal-buttons">
+                <button class="btn-small" id="confirmClear">Sim, Limpar Tudo</button>
+                <button class="btn-small btn-danger" id="cancelClear">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- New ROP Warning Modal -->
+    <div class="modal" id="newRopWarningModal">
+        <div class="modal-content">
+            <h3>Novo ROP</h3>
+            <p>Ao continuar, o formulário atual será limpo. Deseja prosseguir?</p>
+            <div class="modal-buttons">
+                <button class="btn-small" id="confirmNewRop">Sim, continuar</button>
+                <button class="btn-small btn-danger" id="cancelNewRop">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Parte Modal -->
+    <div class="modal" id="parteModal">
+        <div class="modal-content modal-form">
+            <div class="modal-header">
+                <h3>Parte envolvida</h3>
+                <button class="modal-close" id="closeParteBtn" aria-label="Fechar">&times;</button>
+            </div>
+            <p class="modal-helper">Preencha os dados do envolvido e salve para a lista.</p>
+            <form id="parteForm" class="form-grid">
+                <div class="form-group">
+                    <label for="parteRole" class="required-label"><i class="fas fa-user-tag"></i> Tipo</label>
+                    <select id="parteRole" class="required">
+                        <option value="">Selecione</option>
+                        <option value="Autor">Autor</option>
+                        <option value="Vítima">Vítima</option>
+                        <option value="Testemunha">Testemunha</option>
+                        <option value="Outros">Outros</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="parteNome" class="required-label"><i class="fas fa-user"></i> Nome</label>
+                    <input type="text" id="parteNome" class="required" placeholder="Nome completo">
+                </div>
+                <div class="form-group">
+                    <label for="parteSexo"><i class="fas fa-venus-mars"></i> Sexo</label>
+                    <select id="parteSexo">
+                        <option value="masculino">Masculino</option>
+                        <option value="feminino">Feminino</option>
+                        <option value="outros">Outros</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="parteCondicao"><i class="fas fa-notes-medical"></i> Condição Física</label>
+                    <select id="parteCondicao">
+                        <option value="sem_ferimentos">Sem Ferimentos</option>
+                        <option value="especificado_abaixo">Especificado no relato</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="parteCpf"><i class="fas fa-id-card"></i> CPF</label>
+                    <input type="text" id="parteCpf" placeholder="000.000.000-00" inputmode="numeric" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label for="parteNascimento"><i class="fas fa-calendar-alt"></i> Nascimento</label>
+                    <input type="date" id="parteNascimento">
+                </div>
+                <div class="form-group">
+                    <label for="partePai"><i class="fas fa-user"></i> Pai</label>
+                    <input type="text" id="partePai" placeholder="Nome do pai">
+                </div>
+                <div class="form-group">
+                    <label for="parteMae"><i class="fas fa-user"></i> Mãe</label>
+                    <input type="text" id="parteMae" placeholder="Nome da mãe">
+                </div>
+                <div class="form-group">
+                    <label for="parteNaturalidade"><i class="fas fa-map-marker-alt"></i> Naturalidade</label>
+                    <input type="text" id="parteNaturalidade" placeholder="Naturalidade">
+                </div>
+                <div class="form-group">
+                    <label for="parteEndereco"><i class="fas fa-home"></i> Endereço</label>
+                    <input type="text" id="parteEndereco" placeholder="Endereço">
+                </div>
+                <div class="form-group">
+                    <label for="parteCidadeUf"><i class="fas fa-map"></i> Cidade/UF</label>
+                    <input type="text" id="parteCidadeUf" placeholder="Cidade/UF">
+                </div>
+                <div class="form-group">
+                    <label for="parteTelefone"><i class="fas fa-phone"></i> Telefone</label>
+                    <input type="text" id="parteTelefone" placeholder="(00) 00000-0000" inputmode="tel" autocomplete="off">
+                </div>
+            </form>
+            <div class="modal-buttons">
+                <button class="btn-small" id="saveParteBtn">Salvar</button>
+                <button class="btn-small btn-danger" id="cancelParteBtn">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- Admin Create User Modal -->
+    <div class="modal" id="userCreateModal">
+        <div class="modal-content modal-form">
+            <h3>Novo usuário</h3>
+            <form id="userCreateForm" class="form-grid">
+                <div class="form-group">
+                    <label for="userCreateWarName" class="required-label"><i class="fas fa-user"></i> Nome de Guerra</label>
+                    <select id="userCreateWarName" class="required"></select>
+                </div>
+                <div class="form-group">
+                    <label for="userCreateClass" class="required-label"><i class="fas fa-layer-group"></i> Classe</label>
+                    <input type="text" id="userCreateClass" class="required" placeholder="Classe" readonly>
+                </div>
+                <div class="form-group">
+                    <label for="userCreateRegistration" class="required-label"><i class="fas fa-id-badge"></i> Matrícula</label>
+                    <input type="text" id="userCreateRegistration" class="required" placeholder="Matrícula" readonly>
+                </div>
+                <div class="form-group">
+                    <label for="userCreateEmail" class="required-label"><i class="fas fa-envelope"></i> E-mail</label>
+                    <input type="email" id="userCreateEmail" class="required" placeholder="usuario@email.com">
+                </div>
+                <div class="form-group">
+                    <label for="userCreatePassword" class="required-label"><i class="fas fa-lock"></i> Senha</label>
+                    <input type="password" id="userCreatePassword" class="required" placeholder="Senha inicial">
+                </div>
+                <div class="form-group">
+                    <label for="userCreateType" class="required-label"><i class="fas fa-user-shield"></i> Tipo</label>
+                    <select id="userCreateType" class="required">
+                        <option value="usuario">Usuário</option>
+                        <option value="administrador">Administrador</option>
+                    </select>
+                </div>
+            </form>
+            <p class="login-error" id="userCreateError" aria-live="polite"></p>
+            <div class="modal-buttons">
+                <button class="btn-small" id="saveUserCreateBtn">Criar usuário</button>
+                <button class="btn-small btn-danger" id="cancelUserCreateBtn">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Admin Edit User Modal -->
+    <div class="modal" id="userEditModal">
+        <div class="modal-content modal-form">
+            <div class="modal-header">
+                <h3>Editar usuário</h3>
+                <button class="modal-close" id="closeUserEditBtn" aria-label="Fechar">&times;</button>
+            </div>
+            <form id="userEditForm" class="form-grid">
+                <div class="form-group">
+                    <label for="userEditClass" class="required-label"><i class="fas fa-layer-group"></i> Classe</label>
+                    <select id="userEditClass" class="required">
+                        <option value="">Selecione</option>
+                        <option value="S INSP 2ª CL">S INSP 2ª CL</option>
+                        <option value="S INSP 3ª CL">S INSP 3ª CL</option>
+                        <option value="SUP">SUP</option>
+                        <option value="GUARDA AUXILIAR">GUARDA AUXILIAR</option>
+                        <option value="GM">GM</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="userEditWarName" class="required-label"><i class="fas fa-user"></i> Nome de Guerra</label>
+                    <input type="text" id="userEditWarName" class="required" placeholder="Nome de guerra" list="warNamesList">
+                </div>
+                <div class="form-group">
+                    <label for="userEditRegistration" class="required-label"><i class="fas fa-id-badge"></i> Matrícula</label>
+                    <input type="text" id="userEditRegistration" class="required" placeholder="Matrícula">
+                </div>
+                <div class="form-group">
+                    <label for="userEditType" class="required-label"><i class="fas fa-user-shield"></i> Tipo</label>
+                    <select id="userEditType" class="required">
+                        <option value="usuario">Usuário</option>
+                        <option value="administrador">Administrador</option>
+                    </select>
+                </div>
+            </form>
+            <p class="login-error" id="userEditError" aria-live="polite"></p>
+            <div class="modal-buttons">
+                <button class="btn-small" id="saveUserEditBtn">Salvar</button>
+                <button class="btn-small btn-danger" id="cancelUserEditBtn">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Reset Password Modal -->
+    <div class="modal" id="resetPasswordModal">
+        <div class="modal-content modal-form">
+            <div class="modal-header">
+                <h3>Resetar senha</h3>
+                <button class="modal-close" id="closeResetPasswordBtn" aria-label="Fechar">&times;</button>
+            </div>
+            <p class="modal-helper">Confirme o envio do e-mail de redefinição de senha.</p>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label for="resetPasswordName"><i class="fas fa-user"></i> Usuário</label>
+                    <input type="text" id="resetPasswordName" readonly>
+                </div>
+                <div class="form-group">
+                    <label for="resetPasswordEmail"><i class="fas fa-envelope"></i> E-mail</label>
+                    <input type="email" id="resetPasswordEmail" readonly>
+                </div>
+                <div class="form-group span-3">
+                    <div class="login-error" id="resetPasswordError"></div>
+                </div>
+            </div>
+            <div class="modal-buttons">
+                <button class="btn-small" id="confirmResetPasswordBtn">Enviar e-mail</button>
+                <button class="btn-small btn-danger" id="cancelResetPasswordBtn">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- War Name Modal -->
+    <div class="modal" id="warNameModal">
+        <div class="modal-content modal-form">
+            <h3>Novo nome de guerra</h3>
+            <form id="warNameForm" class="form-grid">
+                <div class="form-group">
+                    <label for="warNameClass" class="required-label"><i class="fas fa-layer-group"></i> Classe</label>
+                    <select id="warNameClass" class="required">
+                        <option value="">Selecione</option>
+                        <option value="S INSP 2ª CL">S INSP 2ª CL</option>
+                        <option value="S INSP 3ª CL">S INSP 3ª CL</option>
+                        <option value="SUP">SUP</option>
+                        <option value="GUARDA AUXILIAR">GUARDA AUXILIAR</option>
+                        <option value="GM">GM</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="warNameValue" class="required-label"><i class="fas fa-user"></i> Nome de Guerra</label>
+                    <input type="text" id="warNameValue" class="required" placeholder="Nome de guerra">
+                </div>
+                <div class="form-group">
+                    <label for="warNameRegistration" class="required-label"><i class="fas fa-id-badge"></i> Matrícula</label>
+                    <input type="text" id="warNameRegistration" class="required" placeholder="Matrícula">
+                </div>
+                <div class="form-group">
+                    <label for="warNameStatus" class="required-label"><i class="fas fa-toggle-on"></i> Status</label>
+                    <select id="warNameStatus" class="required">
+                        <option value="ativo" selected>Ativo</option>
+                        <option value="inativo">Inativo</option>
+                    </select>
+                </div>
+            </form>
+            <p class="login-error" id="warNameError" aria-live="polite"></p>
+            <div class="modal-buttons">
+                <button class="btn-small" id="saveWarNameBtn">Salvar</button>
+                <button class="btn-small btn-danger" id="cancelWarNameBtn">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer>
+        <p>Polícia Municipal de Aracaju - Gestão de ROP</p>
+        <p>© 2026 - Todos os direitos reservados</p>
+        <p style="font-size: 0.9rem; opacity: 0.7;">Versão 1.0 - Sistema de Relatórios de Ocorrência</p>
+    </footer>
+</div>
