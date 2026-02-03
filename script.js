@@ -3521,8 +3521,28 @@ async function exportToPDF(ropData) {
     sectionHeader = drawSectionHeader('II - DADOS DAS PARTES ENVOLVIDAS NA OCORRÊNCIA');
     sectionTopY = sectionHeader.headerTop;
 
-    if (ropData.partes && ropData.partes.length > 0) {
-        ropData.partes.forEach((parte, index) => {
+    const partesRaw = Array.isArray(ropData.partes) ? ropData.partes : [];
+    const partesValid = partesRaw.filter(parte => {
+        if (!parte) return false;
+        const values = [
+            parte.role,
+            parte.nome,
+            parte.cpf,
+            parte.telefone,
+            parte.dataNascimento,
+            parte.pai,
+            parte.mae,
+            parte.condicaoFisica,
+            parte.sexo,
+            parte.naturalidade,
+            parte.endereco,
+            parte.cidadeUf
+        ];
+        return values.some(value => String(value || '').trim().length > 0);
+    });
+
+    if (partesValid.length > 0) {
+        partesValid.forEach((parte, index) => {
             if (y > pageHeight - 60) {
                 drawSectionLines(sectionTopY, y);
                 addPageWithBorders();
@@ -3564,6 +3584,7 @@ async function exportToPDF(ropData) {
     } else {
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(10);
+        doc.setTextColor(0, 0, 0);
         doc.text('Sem envolvidos', contentX, y);
         y += 15;
     }
@@ -3594,7 +3615,14 @@ async function exportToPDF(ropData) {
     sectionHeader = drawSectionHeader('IV - APREENSÕES (OBJETOS, ARMAS, VEÍCULOS, SUBSTÂNCIA ENTORPECENTE, OUTROS...)');
     sectionTopY = sectionHeader.headerTop;
 
-    if (ropData.apreensoes && ropData.apreensoes.length > 0) {
+    const apreensoesRaw = Array.isArray(ropData.apreensoes) ? ropData.apreensoes : [];
+    const apreensoesValid = apreensoesRaw.filter(item => {
+        if (!item) return false;
+        const values = [item.tipo, item.especificacao];
+        return values.some(value => String(value || '').trim().length > 0);
+    });
+
+    if (apreensoesValid.length > 0) {
         // Tabela de apreensões com altura dinâmica
         const tableWidth = contentWidth;
         const col1Width = tableWidth * 0.3;
@@ -3614,7 +3642,7 @@ async function exportToPDF(ropData) {
         y += 8;
         
         // Linhas da tabela com quebra de linha
-        ropData.apreensoes.forEach((item, index) => {
+        apreensoesValid.forEach((item, index) => {
             if (y > pageHeight - 50) {
                 drawSectionLines(sectionTopY, y);
                 addPageWithBorders();
@@ -3671,6 +3699,7 @@ async function exportToPDF(ropData) {
     } else {
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(10);
+        doc.setTextColor(0, 0, 0);
         doc.text('Sem objetos apreendidos', contentX, y);
         y += 15;
     }
@@ -3742,6 +3771,7 @@ async function exportToPDF(ropData) {
     } else {
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(10);
+        doc.setTextColor(0, 0, 0);
         doc.text('Sem imagens anexadas', contentX, y);
         y += 15;
     }
@@ -4047,15 +4077,23 @@ function formatNatureza(value) {
 
 function collectAnexosUrls(ropData) {
     const list = Array.isArray(ropData?.anexosUrls) ? ropData.anexosUrls.slice() : [];
-    if (!list.length && ropData?.anexos) {
-        const parsed = String(ropData.anexos)
-            .split(/\r?\n/)
-            .map(line => line.trim())
-            .filter(Boolean)
-            .filter(line => /^https?:\/\//i.test(line));
-        return parsed;
-    }
-    return list.filter(line => /^https?:\/\//i.test(line));
+    const rawLines = list.length ? list : (ropData?.anexos ? String(ropData.anexos).split(/\r?\n/) : []);
+
+    const isAllowed = (line) => {
+        const value = String(line || '').trim();
+        if (!value) return false;
+        if (/^https?:\/\//i.test(value)) return true;
+        if (/^gs:\/\//i.test(value)) return true;
+        if (/firebasestorage\.googleapis\.com/i.test(value)) return true;
+        if (/storage\.googleapis\.com/i.test(value)) return true;
+        if (/\.firebasestorage\.app/i.test(value)) return true;
+        if (/^anexos\//i.test(value)) return true;
+        return false;
+    };
+
+    return rawLines
+        .map(line => String(line || '').trim())
+        .filter(isAllowed);
 }
 
 function getImageFormatFromUrl(url) {
@@ -4085,6 +4123,13 @@ async function resolveStorageUrl(url) {
     if (cleaned.startsWith('gs://') && storage?.refFromURL) {
         try {
             return await storage.refFromURL(cleaned).getDownloadURL();
+        } catch (error) {
+            return '';
+        }
+    }
+    if (!/^https?:\/\//i.test(cleaned) && storage?.ref) {
+        try {
+            return await storage.ref().child(cleaned).getDownloadURL();
         } catch (error) {
             return '';
         }
@@ -4120,7 +4165,10 @@ async function loadImageForPdf(url) {
     try {
         const resolvedUrl = await resolveStorageUrl(url);
         if (!resolvedUrl) return null;
-        const blob = await fetchImageBlob(resolvedUrl, 2);
+        const withBust = resolvedUrl.includes('?')
+            ? `${resolvedUrl}&t=${Date.now()}`
+            : `${resolvedUrl}?t=${Date.now()}`;
+        const blob = await fetchImageBlob(withBust, 2);
         const type = (blob.type || '').toLowerCase();
         const dataUrl = await blobToDataUrl(blob);
         const img = await loadImage(dataUrl);
@@ -4145,7 +4193,10 @@ async function loadImageForPdf(url) {
         try {
             const resolvedUrl = await resolveStorageUrl(url);
             if (!resolvedUrl) return null;
-            const img = await loadImage(resolvedUrl, true);
+            const withBust = resolvedUrl.includes('?')
+                ? `${resolvedUrl}&t=${Date.now()}`
+                : `${resolvedUrl}?t=${Date.now()}`;
+            const img = await loadImage(withBust, true);
             if (!img) return null;
             const canvas = document.createElement('canvas');
             canvas.width = img.width;
