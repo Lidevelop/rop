@@ -2398,6 +2398,24 @@ async function uploadPendingAnexosToStorage(ropId) {
         saveStatus.textContent = 'Enviando imagens...';
         const uid = auth.currentUser.uid;
         const uploads = [];
+        const remainingPending = [];
+
+        const uploadWithTimeout = (ref, file, metadata, timeoutMs = 20000) => {
+            const task = ref.put(file, metadata);
+            let timeoutId;
+            const timeoutPromise = new Promise((_, reject) => {
+                timeoutId = setTimeout(() => {
+                    try {
+                        task.cancel();
+                    } catch (err) {
+                        // ignore cancel errors
+                    }
+                    reject(new Error('timeout'));
+                }, timeoutMs);
+            });
+            return Promise.race([task, timeoutPromise])
+                .finally(() => clearTimeout(timeoutId));
+        };
 
         for (const item of anexosPending) {
             const file = item.file;
@@ -2405,9 +2423,16 @@ async function uploadPendingAnexosToStorage(ropId) {
             const safeName = (file.name || 'imagem').replace(/[^a-zA-Z0-9._-]/g, '_');
             const path = `anexos/${ropId}/${uid}/${Date.now()}_${safeName}`;
             const ref = storage.ref().child(path);
-            await ref.put(file, { contentType: file.type });
-            const url = await ref.getDownloadURL();
-            uploads.push(url);
+
+            try {
+                await uploadWithTimeout(ref, file, { contentType: file.type }, 20000);
+                const url = await ref.getDownloadURL();
+                uploads.push(url);
+                if (item?.previewUrl) URL.revokeObjectURL(item.previewUrl);
+            } catch (error) {
+                console.error('Falha ao enviar anexo:', error);
+                remainingPending.push(item);
+            }
         }
 
         if (uploads.length) {
@@ -2425,14 +2450,15 @@ async function uploadPendingAnexosToStorage(ropId) {
             }, { merge: true });
         }
 
-        anexosPending.forEach(item => {
-            if (item?.previewUrl) URL.revokeObjectURL(item.previewUrl);
-        });
-        anexosPending = [];
+        anexosPending = remainingPending;
 
         renderAnexosUploadsPreview();
         updateEmptyFlags();
-        saveStatus.textContent = 'Imagens anexadas com sucesso.';
+        if (anexosPending.length) {
+            saveStatus.textContent = 'Algumas imagens falharam no envio. Tente novamente.';
+        } else {
+            saveStatus.textContent = 'Imagens anexadas com sucesso.';
+        }
         setTimeout(() => {
             if (saveStatus) saveStatus.textContent = 'Salvo automaticamente';
         }, 2500);
