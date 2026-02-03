@@ -6,7 +6,7 @@ const firebaseConfig = {
     apiKey: "AIzaSyDpMbzbUesMjUqtoF3UC0LpKU3t6HSkSrE",
     authDomain: "ropgma-bf685.firebaseapp.com",
     projectId: "ropgma-bf685",
-    storageBucket: "ropgma-bf685.appspot.com",
+    storageBucket: "ropgma-bf685.firebasestorage.app",
     messagingSenderId: "458706183661",
     appId: "1:458706183661:web:0e92990b3f6e31f25133e4",
     measurementId: "G-52PRVFRNFP"
@@ -1454,6 +1454,10 @@ function applyFormData(formData) {
     const destinatarioSelect = document.getElementById('destinatario');
     if (destinatarioSelect) {
         window._destinatarioToRestore = formData.destinatario || '';
+        // Aguarda o carregamento das opções antes de setar o valor
+        setTimeout(() => {
+            destinatarioSelect.value = window._destinatarioToRestore;
+        }, 100);
     }
     document.getElementById('natureza').value = formData.natureza || '';
     document.getElementById('tipoDelito').value = formData.tipoDelito || '';
