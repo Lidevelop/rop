@@ -1102,7 +1102,18 @@ function hydrateDelegaciasSelect(selectEl) {
         selectEl.appendChild(option);
     });
 
-    if (currentValue) {
+    if (window._destinatarioToRestore) {
+        const restoreValue = window._destinatarioToRestore;
+        const exists = Array.from(selectEl.options).some(opt => opt.value === restoreValue);
+        if (!exists && restoreValue) {
+            const extra = document.createElement('option');
+            extra.value = restoreValue;
+            extra.textContent = restoreValue;
+            selectEl.appendChild(extra);
+        }
+        selectEl.value = restoreValue;
+        window._destinatarioToRestore = null;
+    } else if (currentValue) {
         const exists = Array.from(selectEl.options).some(opt => opt.value === currentValue);
         if (!exists) {
             const extra = document.createElement('option');
@@ -1423,7 +1434,8 @@ function getFormData() {
             nomeGuerra: currentUserProfile.nomeGuerra || '',
             matricula: currentUserProfile.matricula || '',
             classe: currentUserProfile.classe || ''
-        } : null
+        } : null,
+        delegacia: document.getElementById('delegacia')?.value?.trim() || ''
     };
 }
 
@@ -1439,7 +1451,10 @@ function applyFormData(formData) {
     }
     document.getElementById('dataFato').value = formData.dataFato || '';
     document.getElementById('horaFato').value = formData.horaFato || '';
-    document.getElementById('destinatario').value = formData.destinatario || '';
+    const destinatarioSelect = document.getElementById('destinatario');
+    if (destinatarioSelect) {
+        window._destinatarioToRestore = formData.destinatario || '';
+    }
     document.getElementById('natureza').value = formData.natureza || '';
     document.getElementById('tipoDelito').value = formData.tipoDelito || '';
     document.getElementById('localOcorrencia').value = formData.localOcorrencia || '';
@@ -1448,6 +1463,9 @@ function applyFormData(formData) {
     document.getElementById('numero').value = formData.numero || 'S/N';
     document.getElementById('bairro').value = formData.bairro || '';
     document.getElementById('relato').value = formData.relato || '';
+    if (document.getElementById('delegacia')) {
+        document.getElementById('delegacia').value = formData.delegacia || '';
+    }
     document.getElementById('postoServico').value = formData.postoServico || '';
     document.getElementById('turno').value = formData.turno || '';
     anexosUrls = Array.isArray(formData.anexosUrls) ? formData.anexosUrls.slice() : [];
@@ -1660,8 +1678,9 @@ async function loadRopsList(force = false) {
 
         ropsCache = docs.map(doc => ({ id: doc.id, ...doc.data() }));
         ropsCache.sort((a, b) => {
-            const aDate = a.dataFato ? new Date(a.dataFato).getTime() : 0;
-            const bDate = b.dataFato ? new Date(b.dataFato).getTime() : 0;
+            // Ordena pelo campo criadoEm ou createdAt, do mais novo para o mais antigo
+            const aDate = a.criadoEm ? a.criadoEm.toDate?.() ? a.criadoEm.toDate() : new Date(a.criadoEm) : (a.createdAt ? a.createdAt.toDate?.() ? a.createdAt.toDate() : new Date(a.createdAt) : 0);
+            const bDate = b.criadoEm ? b.criadoEm.toDate?.() ? b.criadoEm.toDate() : new Date(b.criadoEm) : (b.createdAt ? b.createdAt.toDate?.() ? b.createdAt.toDate() : new Date(b.createdAt) : 0);
             return bDate - aDate;
         });
 
@@ -3564,7 +3583,7 @@ async function exportToPDF(ropData) {
             const leftX = contentX;
             const rightX = contentX + colWidth + colGap;
             let leftHeight = drawField(leftX, y, 'Nome:', parte.nome, colWidth);
-            let rightHeight = drawField(rightX, y, 'Data de Nasc.:', parte.dataNascimento, colWidth);
+            let rightHeight = drawField(rightX, y, 'Data de Nasc.:', formatDate(parte.dataNascimento), colWidth);
             y += Math.max(leftHeight, rightHeight) + 2;
             leftHeight = drawField(leftX, y, 'Pai:', parte.pai, colWidth);
             rightHeight = drawField(rightX, y, 'Mãe:', parte.mae, colWidth);
@@ -3750,7 +3769,11 @@ async function exportToPDF(ropData) {
             } else {
                 doc.setFont('helvetica', 'normal');
                 doc.setFontSize(9);
-                doc.text('Imagem indisponível', cursorX + 5, cursorY + 20);
+                let mensagem = 'Imagem indisponível';
+                if (imgData?.error) {
+                    mensagem += `\n(${imgData.error})`;
+                }
+                doc.text(mensagem, cursorX + 5, cursorY + 20);
             }
 
             doc.setDrawColor(0, 0, 0);
@@ -4164,7 +4187,10 @@ async function fetchImageBlob(url, attempts = 2) {
 async function loadImageForPdf(url) {
     try {
         const resolvedUrl = await resolveStorageUrl(url);
-        if (!resolvedUrl) return null;
+        if (!resolvedUrl) {
+            console.warn('[PDF] Imagem não pôde ser resolvida:', url);
+            return { error: 'URL não resolvida', url };
+        }
         const withBust = resolvedUrl.includes('?')
             ? `${resolvedUrl}&t=${Date.now()}`
             : `${resolvedUrl}?t=${Date.now()}`;
@@ -4172,7 +4198,10 @@ async function loadImageForPdf(url) {
         const type = (blob.type || '').toLowerCase();
         const dataUrl = await blobToDataUrl(blob);
         const img = await loadImage(dataUrl);
-        if (!img) return null;
+        if (!img) {
+            console.warn('[PDF] Imagem não pôde ser carregada:', url);
+            return { error: 'Imagem não pôde ser carregada', url };
+        }
 
         if (type.includes('png')) {
             return { dataUrl, format: 'PNG', width: img.width, height: img.height };
@@ -4185,29 +4214,43 @@ async function loadImageForPdf(url) {
         canvas.width = img.width;
         canvas.height = img.height;
         const ctx = canvas.getContext('2d');
-        if (!ctx) return null;
+        if (!ctx) {
+            console.warn('[PDF] Canvas não pôde ser criado:', url);
+            return { error: 'Canvas não pôde ser criado', url };
+        }
         ctx.drawImage(img, 0, 0);
         const jpegUrl = canvas.toDataURL('image/jpeg', 0.92);
         return { dataUrl: jpegUrl, format: 'JPEG', width: img.width, height: img.height };
     } catch (error) {
+        console.error('[PDF] Erro ao carregar imagem:', url, error);
         try {
             const resolvedUrl = await resolveStorageUrl(url);
-            if (!resolvedUrl) return null;
+            if (!resolvedUrl) {
+                console.warn('[PDF] URL não resolvida (fallback):', url);
+                return { error: 'URL não resolvida (fallback)', url };
+            }
             const withBust = resolvedUrl.includes('?')
                 ? `${resolvedUrl}&t=${Date.now()}`
                 : `${resolvedUrl}?t=${Date.now()}`;
             const img = await loadImage(withBust, true);
-            if (!img) return null;
+            if (!img) {
+                console.warn('[PDF] Imagem não pôde ser carregada (fallback):', url);
+                return { error: 'Imagem não pôde ser carregada (fallback)', url };
+            }
             const canvas = document.createElement('canvas');
             canvas.width = img.width;
             canvas.height = img.height;
             const ctx = canvas.getContext('2d');
-            if (!ctx) return null;
+            if (!ctx) {
+                console.warn('[PDF] Canvas não pôde ser criado (fallback):', url);
+                return { error: 'Canvas não pôde ser criado (fallback)', url };
+            }
             ctx.drawImage(img, 0, 0);
             const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
             return { dataUrl, format: 'JPEG', width: img.width, height: img.height };
         } catch (err) {
-            return null;
+            console.error('[PDF] Erro ao carregar imagem (fallback):', url, err);
+            return { error: 'Erro ao carregar imagem (fallback)', url };
         }
     }
 }
