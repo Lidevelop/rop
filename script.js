@@ -1675,7 +1675,22 @@ async function logEvent(action, metadata = {}) {
 
 async function loadRopsList(force = false) {
     if (!db || !auth || !auth.currentUser || isLoadingRops) return;
-    if (ropsCache.length > 0 && !force) {
+
+    // Cache localStorage: chave, tempo de expiração (10 min)
+    const CACHE_KEY = 'ropsCache';
+    const CACHE_EXPIRATION = 10 * 60 * 1000; // 10 minutos
+    let cacheData = null;
+    try {
+        const raw = localStorage.getItem(CACHE_KEY);
+        if (raw) {
+            cacheData = JSON.parse(raw);
+        }
+    } catch {}
+
+    const now = Date.now();
+    if (!force && cacheData && Array.isArray(cacheData.data) && cacheData.timestamp && (now - cacheData.timestamp < CACHE_EXPIRATION)) {
+        ropsCache = cacheData.data;
+        ropsCurrentPage = 1;
         applyRopsFilter();
         return;
     }
@@ -1710,6 +1725,11 @@ async function loadRopsList(force = false) {
             const bDate = b.criadoEm ? b.criadoEm.toDate?.() ? b.criadoEm.toDate() : new Date(b.criadoEm) : (b.createdAt ? b.createdAt.toDate?.() ? b.createdAt.toDate() : new Date(b.createdAt) : 0);
             return bDate - aDate;
         });
+
+        // Salva no cache localStorage
+        try {
+            localStorage.setItem(CACHE_KEY, JSON.stringify({ data: ropsCache, timestamp: Date.now() }));
+        } catch {}
 
         if (isAdmin) {
             // Best-effort: backfill participant arrays so queries/rules work reliably.
