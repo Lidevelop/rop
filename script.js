@@ -2027,7 +2027,7 @@ function renderRopsList(rops) {
                 <div class="operation-meta-item"><strong>Natureza:</strong> ${formatNatureza(rop.natureza) || 'Não informado'}</div>
                 <div class="operation-meta-item"><strong>Posto de serviço:</strong> ${escapeHtml(rop.postoServico || 'Não informado')}</div>
                 <div class="operation-meta-item"><strong>Registrado por:</strong> ${rop.createdBy?.nomeGuerra || 'Não informado'}</div>
-                <div class="operation-meta-item"><strong>Criado em:</strong> ${formatDateTime(rop.createdAt)}</div>
+                <div class="operation-meta-item"><strong>Criado em:</strong> ${formatDateTime(getRopCreatedAtDate(rop))}</div>
                 <div class="operation-meta-item"><strong>Atualizado em:</strong> ${updatedAtText}</div>
                 <div class="operation-meta-item"><strong>Atualizado por:</strong> ${updatedByText}</div>
                 <div class="operation-meta-item operation-meta-agentes"><strong>Agentes na ocorrência:</strong> ${escapeHtml(agentesLine)}</div>
@@ -2114,9 +2114,18 @@ function getRopEditPermission(rop) {
 
 function getRopCreatedAtDate(rop) {
     if (!rop?.createdAt) return null;
-    if (rop.createdAt.toDate) return rop.createdAt.toDate();
+    // Firebase Timestamp
+    if (typeof rop.createdAt === 'object' && typeof rop.createdAt.toDate === 'function') {
+        return rop.createdAt.toDate();
+    }
+    // ISO string ou número
     const date = new Date(rop.createdAt);
-    return Number.isNaN(date.getTime()) ? null : date;
+    if (!Number.isNaN(date.getTime())) return date;
+    // Fallback: Firestore Timestamp (seconds)
+    if (typeof rop.createdAt === 'object' && typeof rop.createdAt.seconds === 'number') {
+        return new Date(rop.createdAt.seconds * 1000);
+    }
+    return null;
 }
 
 function escapeHtml(value) {
@@ -4257,7 +4266,7 @@ async function exportToPDF(ropData) {
 
     // Rodapé informativo (registro/emissão)
     const registradoPor = ropData.createdBy?.nomeGuerra || 'Não informado';
-    const registradoEm = formatDateTime(ropData.createdAt);
+    const registradoEm = formatDateTime(getRopCreatedAtDate(ropData));
     const hasUpdate = Boolean(ropData.updatedAt);
     const atualizadoPor = hasUpdate ? (ropData.updatedBy?.nomeGuerra || 'Não informado') : '—';
     const atualizadoEm = hasUpdate ? formatDateTime(ropData.updatedAt) : '—';
