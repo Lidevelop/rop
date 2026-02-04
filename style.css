@@ -288,6 +288,10 @@ body {
     justify-content: flex-end;
 }
 
+.header-toggle {
+    display: none !important;
+}
+
 .admin-menu {
     position: relative;
 }
@@ -1627,6 +1631,11 @@ footer p:first-child {
         display: none;
     }
 
+    #apreensoesContainer table,
+    #agentesContainer table {
+        display: table;
+    }
+
     #usersView .table-responsive table,
     #logsView .table-responsive table {
         display: table;
@@ -1649,6 +1658,19 @@ footer p:first-child {
     .header-actions {
         flex-wrap: wrap;
         justify-content: flex-end;
+    }
+
+    .header-toggle {
+        display: inline-flex !important;
+    }
+
+    body.header-collapsed header .logo-text,
+    body.header-collapsed .profile-summary-card.header-profile {
+        display: none !important;
+    }
+
+    body.header-collapsed header {
+        padding-bottom: 0.6rem;
     }
 
     .idle-timer {

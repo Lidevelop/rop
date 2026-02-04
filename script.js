@@ -22,6 +22,37 @@ let forcedRopIdFilter = null;
 const ROPS_PAGE_SIZE = 6;
 let ropsCurrentPage = 1;
 
+const CACHE_TTL = {
+    warNames: 30 * 60 * 1000,
+    delegacias: 30 * 60 * 1000,
+    users: 10 * 60 * 1000,
+    logs: 5 * 60 * 1000
+};
+
+function readLocalCache(key, maxAgeMs) {
+    try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || !parsed.timestamp || !Array.isArray(parsed.data)) return null;
+        if (Date.now() - parsed.timestamp > maxAgeMs) return null;
+        return parsed.data;
+    } catch {
+        return null;
+    }
+}
+
+function writeLocalCache(key, data) {
+    try {
+        localStorage.setItem(key, JSON.stringify({
+            timestamp: Date.now(),
+            data: Array.isArray(data) ? data : []
+        }));
+    } catch {
+        // ignore cache failures
+    }
+}
+
 let saveTimeout = null;
 let currentUserProfile = null;
 let isAdmin = false;
@@ -159,6 +190,7 @@ const saveIndicator = document.getElementById('saveIndicator');
 const saveStatus = document.getElementById('saveStatus');
 const lastSaved = document.getElementById('lastSaved');
 const idleTimerDisplay = document.getElementById('idleTimer');
+const toggleHeaderBtn = document.getElementById('toggleHeaderBtn');
 const registroNumeroInput = document.getElementById('registroNumero');
 const registroNumeroDisplay = document.getElementById('registroNumeroDisplay');
 const idlePromptModal = document.getElementById('idlePromptModal');
@@ -413,14 +445,17 @@ function initFirebase() {
                 return;
             }
 
+            const hasActiveSession = storedDeadline && storedDeadline > Date.now();
+
             showAppView();
             await initializeUserProfileFlow(user);
-            await loadWarNamesList(true);
-            await loadDelegaciasList(true);
-            await loadRopsList(true);
-            await logEvent('login');
+            await loadWarNamesList(false);
+            await loadDelegaciasList(false);
+            await loadRopsList(false);
+            if (!hasActiveSession) {
+                await logEvent('login');
+            }
             startIdleLogoutTimer();
-            await loadNextRopNumberPreview();
         } else {
             showLoginView();
             resetUserProfileState();
@@ -567,6 +602,36 @@ function initializeEventListeners() {
                 }
             });
         }
+    const applyMobileHeaderState = (forceCollapse = false) => {
+        if (!toggleHeaderBtn) return;
+        const isMobile = window.matchMedia('(max-width: 768px)').matches;
+        if (!isMobile) {
+            document.body.classList.remove('header-collapsed');
+            toggleHeaderBtn.style.display = 'none';
+            toggleHeaderBtn.setAttribute('aria-expanded', 'true');
+            toggleHeaderBtn.innerHTML = '<i class="fas fa-chevron-up"></i> Recolher cabeçalho';
+            return;
+        }
+
+        toggleHeaderBtn.style.display = '';
+        if (forceCollapse) {
+            document.body.classList.add('header-collapsed');
+            toggleHeaderBtn.setAttribute('aria-expanded', 'false');
+            toggleHeaderBtn.innerHTML = '<i class="fas fa-chevron-down"></i> Expandir cabeçalho';
+        }
+    };
+
+    if (toggleHeaderBtn) {
+        toggleHeaderBtn.addEventListener('click', () => {
+            const isCollapsed = document.body.classList.toggle('header-collapsed');
+            toggleHeaderBtn.setAttribute('aria-expanded', String(!isCollapsed));
+            toggleHeaderBtn.innerHTML = isCollapsed
+                ? '<i class="fas fa-chevron-down"></i> Expandir cabeçalho'
+                : '<i class="fas fa-chevron-up"></i> Recolher cabeçalho';
+        });
+        applyMobileHeaderState(true);
+        window.addEventListener('resize', () => applyMobileHeaderState(false));
+    }
     formInputs.forEach(input => {
         input.addEventListener('input', () => {
             if (input.classList.contains('field-error')) {
@@ -616,11 +681,11 @@ function initializeEventListeners() {
             try {
                 saveStatus.textContent = 'Salvando no Firebase...';
                 const formData = getFormData();
-                const savedId = await saveRopToFirebase(formData);
-                if (savedId) {
-                    await uploadPendingAnexosToStorage(savedId);
+                const saveResult = await saveRopToFirebase(formData);
+                if (saveResult?.id) {
+                    await uploadPendingAnexosToStorage(saveResult.id, !saveResult.isNew);
                     await deleteRemovedAnexosFromStorage();
-                    forcedRopIdFilter = savedId;
+                    forcedRopIdFilter = saveResult.id;
                     clearForm();
                     setActiveAppView('manager');
                     loadRopsList(true);
@@ -670,19 +735,19 @@ function initializeEventListeners() {
     if (viewUsersBtn) viewUsersBtn.addEventListener('click', () => {
         if (isAdmin) {
             setActiveAppView('users');
-            loadUsersList(true);
+            loadUsersList(false);
         }
     });
     if (viewWarNamesBtn) viewWarNamesBtn.addEventListener('click', () => {
         if (isAdmin) {
             setActiveAppView('warNames');
-            loadWarNamesList(true);
+            loadWarNamesList(false);
         }
     });
     if (viewLogsBtn) viewLogsBtn.addEventListener('click', () => {
         if (isAdmin) {
             setActiveAppView('logs');
-            loadLogsList(true);
+            loadLogsList(false);
         }
     });
 
@@ -1049,7 +1114,18 @@ async function loadDelegaciasList(force = false) {
 
     if (delegaciasCache.length > 0 && !force) {
         hydrateDelegaciasSelect(destinatarioSelect);
+        renderDelegaciasList();
         return;
+    }
+
+    if (!force) {
+        const cached = readLocalCache('pmuDelegaciasCache', CACHE_TTL.delegacias);
+        if (cached) {
+            delegaciasCache = cached;
+            hydrateDelegaciasSelect(destinatarioSelect);
+            renderDelegaciasList();
+            return;
+        }
     }
 
     isLoadingDelegacias = true;
@@ -1058,6 +1134,7 @@ async function loadDelegaciasList(force = false) {
         delegaciasCache = snapshot.docs
             .map(doc => ({ id: doc.id, ...doc.data() }))
             .filter(item => item && item.nome);
+        writeLocalCache('pmuDelegaciasCache', delegaciasCache);
         hydrateDelegaciasSelect(destinatarioSelect);
         renderDelegaciasList();
     } catch (error) {
@@ -1546,14 +1623,19 @@ async function saveRopToFirebase(formData) {
     try {
         const ropsRef = db.collection('rops');
         let docRef = null;
+        const isNew = !currentRopId;
+        let registroNumeroFinal = formData.registroNumero || '';
 
         const participantMatriculas = buildParticipantMatriculas(formData);
-        const payload = {
+        const basePayload = {
             ...formData,
             ownerId: auth.currentUser.uid,
             participantMatriculas,
             agentesMatriculas: participantMatriculas,
-            agentesNomes: Array.isArray(formData.agentes) ? formData.agentes.map(a => (a?.nomeGuerra || '').trim()).filter(Boolean) : [],
+            agentesNomes: Array.isArray(formData.agentes) ? formData.agentes.map(a => (a?.nomeGuerra || '').trim()).filter(Boolean) : []
+        };
+
+        const updateMeta = isNew ? {} : {
             updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
             updatedBy: currentUserProfile ? {
                 uid: auth.currentUser.uid,
@@ -1562,6 +1644,8 @@ async function saveRopToFirebase(formData) {
                 classe: currentUserProfile.classe
             } : null
         };
+
+        const payload = { ...basePayload, ...updateMeta };
 
         if (currentRopId) {
             docRef = ropsRef.doc(currentRopId);
@@ -1595,6 +1679,7 @@ async function saveRopToFirebase(formData) {
                 });
             });
             currentRopId = docRef.id;
+            registroNumeroFinal = generatedNumber;
             if (registroNumeroInput) {
                 registroNumeroInput.value = generatedNumber;
             }
@@ -1604,9 +1689,9 @@ async function saveRopToFirebase(formData) {
             await loadNextRopNumberPreview();
         }
 
-        await logEvent('rop_saved', { ropId: currentRopId, registroNumero: payload.registroNumero || '' });
+        await logEvent('rop_saved', { ropId: currentRopId, registroNumero: registroNumeroFinal || '' });
         saveStatus.textContent = 'ROP salvo com sucesso!';
-        return currentRopId;
+        return { id: currentRopId, isNew };
     } catch (error) {
         console.error('Erro ao salvar ROP:', error);
         saveStatus.textContent = 'Erro ao salvar ROP.';
@@ -1922,6 +2007,9 @@ function renderRopsList(rops) {
         }
 
         const agentesLine = buildAgentesGroupedLine(rop.agentes);
+        const hasUpdate = Boolean(rop.updatedAt);
+        const updatedAtText = hasUpdate ? formatDateTime(rop.updatedAt) : '—';
+        const updatedByText = hasUpdate ? (rop.updatedBy?.nomeGuerra || 'Não informado') : '—';
 
         const card = document.createElement('div');
         card.className = 'operation-card';
@@ -1940,8 +2028,8 @@ function renderRopsList(rops) {
                 <div class="operation-meta-item"><strong>Posto de serviço:</strong> ${escapeHtml(rop.postoServico || 'Não informado')}</div>
                 <div class="operation-meta-item"><strong>Registrado por:</strong> ${rop.createdBy?.nomeGuerra || 'Não informado'}</div>
                 <div class="operation-meta-item"><strong>Criado em:</strong> ${formatDateTime(rop.createdAt)}</div>
-                <div class="operation-meta-item"><strong>Atualizado em:</strong> ${formatDateTime(rop.updatedAt)}</div>
-                <div class="operation-meta-item"><strong>Atualizado por:</strong> ${rop.updatedBy?.nomeGuerra || 'Não informado'}</div>
+                <div class="operation-meta-item"><strong>Atualizado em:</strong> ${updatedAtText}</div>
+                <div class="operation-meta-item"><strong>Atualizado por:</strong> ${updatedByText}</div>
                 <div class="operation-meta-item operation-meta-agentes"><strong>Agentes na ocorrência:</strong> ${escapeHtml(agentesLine)}</div>
             </div>
             <div class="operation-actions">
@@ -2432,7 +2520,7 @@ async function uploadAnexoImage(file) {
     updateEmptyFlags();
 }
 
-async function uploadPendingAnexosToStorage(ropId) {
+async function uploadPendingAnexosToStorage(ropId, shouldUpdateMeta = true) {
     if (!ropId || !storage || !auth || !auth.currentUser) return;
     if (!anexosPending.length) return;
 
@@ -2481,17 +2569,20 @@ async function uploadPendingAnexosToStorage(ropId) {
         if (uploads.length) {
             const effectiveExisting = getEffectiveAnexosUrls();
             anexosUrls = effectiveExisting.concat(uploads);
-            await db.collection('rops').doc(ropId).set({
+            const updatePayload = {
                 anexosUrls,
-                anexos: anexosUrls.join('\n'),
-                updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-                updatedBy: currentUserProfile ? {
+                anexos: anexosUrls.join('\n')
+            };
+            if (shouldUpdateMeta) {
+                updatePayload.updatedAt = firebase.firestore.FieldValue.serverTimestamp();
+                updatePayload.updatedBy = currentUserProfile ? {
                     uid: auth.currentUser.uid,
                     nomeGuerra: currentUserProfile.nomeGuerra,
                     matricula: currentUserProfile.matricula,
                     classe: currentUserProfile.classe
-                } : null
-            }, { merge: true });
+                } : null;
+            }
+            await db.collection('rops').doc(ropId).set(updatePayload, { merge: true });
         }
 
         anexosPending = remainingPending;
@@ -2816,10 +2907,20 @@ async function loadUsersList(force = false) {
         renderUsersTable();
         return;
     }
+    if (!force) {
+        const cached = readLocalCache('pmuUsersCache', CACHE_TTL.users);
+        if (cached) {
+            usersCache = cached;
+            renderUsersTable();
+            updateUserCreateWarNameSelect(userCreateWarName?.value || '');
+            return;
+        }
+    }
     isLoadingUsers = true;
     try {
         const snapshot = await db.collection('users').orderBy('nomeGuerra').get();
         usersCache = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        writeLocalCache('pmuUsersCache', usersCache);
         renderUsersTable();
         updateUserCreateWarNameSelect(userCreateWarName?.value || '');
     } catch (error) {
@@ -3031,10 +3132,20 @@ async function loadWarNamesList(force = false) {
         updateWarNamesDatalist();
         return;
     }
+    if (!force) {
+        const cached = readLocalCache('pmuWarNamesCache', CACHE_TTL.warNames);
+        if (cached) {
+            warNamesCache = cached;
+            applyWarNamesFilter();
+            updateWarNamesDatalist();
+            return;
+        }
+    }
     isLoadingWarNames = true;
     try {
         const snapshot = await db.collection('warNames').orderBy('nomeGuerra').get();
         warNamesCache = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        writeLocalCache('pmuWarNamesCache', warNamesCache);
         applyWarNamesFilter();
         updateWarNamesDatalist();
     } catch (error) {
@@ -3163,10 +3274,19 @@ async function loadLogsList(force = false) {
         applyLogsFilter();
         return;
     }
+    if (!force) {
+        const cached = readLocalCache('pmuLogsCache', CACHE_TTL.logs);
+        if (cached) {
+            logsCache = cached;
+            applyLogsFilter();
+            return;
+        }
+    }
     isLoadingLogs = true;
     try {
         const snapshot = await db.collection('logs').orderBy('createdAt', 'desc').limit(1000).get();
         logsCache = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        writeLocalCache('pmuLogsCache', logsCache);
         applyLogsFilter();
     } catch (error) {
         console.error(error);
@@ -4138,8 +4258,9 @@ async function exportToPDF(ropData) {
     // Rodapé informativo (registro/emissão)
     const registradoPor = ropData.createdBy?.nomeGuerra || 'Não informado';
     const registradoEm = formatDateTime(ropData.createdAt);
-    const atualizadoPor = ropData.updatedBy?.nomeGuerra || 'Não informado';
-    const atualizadoEm = formatDateTime(ropData.updatedAt);
+    const hasUpdate = Boolean(ropData.updatedAt);
+    const atualizadoPor = hasUpdate ? (ropData.updatedBy?.nomeGuerra || 'Não informado') : '—';
+    const atualizadoEm = hasUpdate ? formatDateTime(ropData.updatedAt) : '—';
     const emitidoPor = currentUserProfile?.nomeGuerra || 'Não informado';
     const emitidoEm = formatDateTime(new Date());
     const footerInfoLine1 = `Registrado por: ${registradoPor} | Criado em: ${registradoEm} | Atualizado por: ${atualizadoPor} | Atualizado em: ${atualizadoEm}`;
