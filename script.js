@@ -93,6 +93,9 @@ let apreensoes = [];
 let agentes = [];
 let anexosUrls = [];
 let anexosPending = [];
+let anexosToRemove = [];
+let lastRemovedAnexo = null;
+let undoAnexoTimeoutId = null;
 
 const CLASSE_OPTIONS = [
     'S INSP 2ª CL',
@@ -616,6 +619,7 @@ function initializeEventListeners() {
                 const savedId = await saveRopToFirebase(formData);
                 if (savedId) {
                     await uploadPendingAnexosToStorage(savedId);
+                    await deleteRemovedAnexosFromStorage();
                     forcedRopIdFilter = savedId;
                     clearForm();
                     setActiveAppView('manager');
@@ -1135,7 +1139,7 @@ function updateEmptyFlags() {
     if (noApreensoesFlagWrapper) noApreensoesFlagWrapper.classList.toggle('hidden', hasApreensoes);
     if (hasApreensoes && noApreensoesFlag) noApreensoesFlag.checked = false;
 
-    const hasAnexos = Array.isArray(anexosUrls) && anexosUrls.length > 0;
+    const hasAnexos = getEffectiveAnexosUrls().length > 0;
     const hasPending = Array.isArray(anexosPending) && anexosPending.length > 0;
     if (noAnexosFlagWrapper) noAnexosFlagWrapper.classList.toggle('hidden', hasAnexos || hasPending);
     if ((hasAnexos || hasPending) && noAnexosFlag) noAnexosFlag.checked = false;
@@ -1210,6 +1214,12 @@ function updateProfileSummary(profile) {
     profileSummaryType.textContent = profile?.tipo || '-';
 }
 
+function getEffectiveAnexosUrls() {
+    return Array.isArray(anexosUrls)
+        ? anexosUrls.filter(url => !anexosToRemove.includes(url))
+        : [];
+}
+
 
 function validateRequiredFields() {
     const requiredIds = ['registroNumero', 'dataFato', 'horaFato', 'destinatario', 'postoServico', 'turno', 'relato'];
@@ -1259,7 +1269,7 @@ function validateRequiredFields() {
         noApreensoesFlagWrapper.classList.remove('field-error');
     }
 
-    const hasAnexos = Array.isArray(anexosUrls) && anexosUrls.length > 0;
+    const hasAnexos = getEffectiveAnexosUrls().length > 0;
     const hasPending = Array.isArray(anexosPending) && anexosPending.length > 0;
     if (!hasAnexos && !hasPending) {
         if (!noAnexosFlag || !noAnexosFlag.checked) {
@@ -1380,6 +1390,12 @@ function clearForm() {
         if (item?.previewUrl) URL.revokeObjectURL(item.previewUrl);
     });
     anexosPending = [];
+    anexosToRemove = [];
+    lastRemovedAnexo = null;
+    if (undoAnexoTimeoutId) {
+        clearTimeout(undoAnexoTimeoutId);
+        undoAnexoTimeoutId = null;
+    }
 
     renderPartes();
     renderApreensoes();
@@ -1400,6 +1416,7 @@ function clearForm() {
 }
 
 function getFormData() {
+    const filteredAnexosUrls = getEffectiveAnexosUrls();
     return {
         registroNumero: document.getElementById('registroNumero').value.trim(),
         dataFato: document.getElementById('dataFato').value,
@@ -1427,8 +1444,8 @@ function getFormData() {
         agentes: agentes.map(item => ({ ...item })),
         postoServico: document.getElementById('postoServico').value.trim(),
         turno: document.getElementById('turno').value.trim(),
-        anexosUrls: Array.isArray(anexosUrls) ? anexosUrls.slice() : [],
-        anexos: Array.isArray(anexosUrls) ? anexosUrls.join('\n') : '',
+        anexosUrls: filteredAnexosUrls.slice(),
+        anexos: filteredAnexosUrls.join('\n'),
         createdBy: currentUserProfile ? {
             uid: auth?.currentUser?.uid || '',
             nomeGuerra: currentUserProfile.nomeGuerra || '',
@@ -1478,6 +1495,12 @@ function applyFormData(formData) {
             .split(/\r?\n/)
             .map(line => line.trim())
             .filter(Boolean);
+    }
+    anexosToRemove = [];
+    lastRemovedAnexo = null;
+    if (undoAnexoTimeoutId) {
+        clearTimeout(undoAnexoTimeoutId);
+        undoAnexoTimeoutId = null;
     }
 
     if (noPartesFlag) noPartesFlag.checked = Boolean(formData.noPartesFlag);
@@ -2387,10 +2410,6 @@ async function uploadAnexoImage(file) {
     anexosPending.push({ id: Date.now() + Math.random(), file, previewUrl });
     renderAnexosUploadsPreview();
     updateEmptyFlags();
-
-    if (currentRopId) {
-        await uploadPendingAnexosToStorage(currentRopId);
-    }
 }
 
 async function uploadPendingAnexosToStorage(ropId) {
@@ -2440,7 +2459,8 @@ async function uploadPendingAnexosToStorage(ropId) {
         }
 
         if (uploads.length) {
-            anexosUrls = Array.isArray(anexosUrls) ? anexosUrls.concat(uploads) : uploads.slice();
+            const effectiveExisting = getEffectiveAnexosUrls();
+            anexosUrls = effectiveExisting.concat(uploads);
             await db.collection('rops').doc(ropId).set({
                 anexosUrls,
                 anexos: anexosUrls.join('\n'),
@@ -2475,9 +2495,34 @@ async function uploadPendingAnexosToStorage(ropId) {
     }
 }
 
+async function deleteRemovedAnexosFromStorage() {
+    if (!storage || !Array.isArray(anexosToRemove) || anexosToRemove.length === 0) return;
+    const targets = anexosToRemove.slice();
+    const remaining = [];
+
+    for (const url of targets) {
+        try {
+            const ref = typeof storage.refFromURL === 'function'
+                ? storage.refFromURL(url)
+                : firebase.storage().refFromURL(url);
+            await ref.delete();
+        } catch (error) {
+            console.error('Falha ao excluir anexo:', error);
+            remaining.push(url);
+        }
+    }
+
+    anexosToRemove = remaining;
+    if (remaining.length) {
+        saveStatus.textContent = 'Algumas imagens não foram excluídas.';
+    }
+}
+
 function renderAnexosUploadsPreview() {
     if (!anexosUploadsList) return;
-    const urls = Array.isArray(anexosUrls) ? anexosUrls : [];
+    const urls = Array.isArray(anexosUrls)
+        ? anexosUrls.filter(url => !anexosToRemove.includes(url))
+        : [];
     const pending = Array.isArray(anexosPending) ? anexosPending : [];
 
     if (!urls.length && !pending.length) {
@@ -2495,6 +2540,9 @@ function renderAnexosUploadsPreview() {
                     <img class="upload-thumb" src="${url}" alt="Anexo" loading="lazy" />
                 </a>
                 <div class="upload-meta">Imagem registrada</div>
+                <div class="upload-actions">
+                    <button class="upload-remove" data-action="remove-uploaded" data-url="${url}">Excluir</button>
+                </div>
             </div>
         `;
     });
@@ -2511,7 +2559,56 @@ function renderAnexosUploadsPreview() {
         `;
     });
 
-    anexosUploadsList.innerHTML = uploadedCards.concat(pendingCards).join('');
+    const undoBanner = lastRemovedAnexo
+        ? `
+            <div class="upload-item upload-undo" data-action="undo-banner">
+                <div class="upload-meta">Imagem removida. Quer desfazer?</div>
+                <div class="upload-actions">
+                    <button class="upload-remove" data-action="undo-remove">Desfazer</button>
+                </div>
+            </div>
+        `
+        : '';
+
+    anexosUploadsList.innerHTML = [undoBanner].concat(uploadedCards, pendingCards).join('');
+
+    anexosUploadsList.querySelectorAll('button[data-action="remove-uploaded"]').forEach(button => {
+        button.addEventListener('click', () => {
+            const url = button.getAttribute('data-url') || '';
+            if (!url) return;
+            const shouldRemove = window.confirm('Remover esta imagem? Ela será excluída somente após salvar o ROP.');
+            if (!shouldRemove) return;
+            if (!anexosToRemove.includes(url)) {
+                anexosToRemove.push(url);
+            }
+            lastRemovedAnexo = url;
+            if (undoAnexoTimeoutId) clearTimeout(undoAnexoTimeoutId);
+            undoAnexoTimeoutId = setTimeout(() => {
+                lastRemovedAnexo = null;
+                undoAnexoTimeoutId = null;
+                renderAnexosUploadsPreview();
+            }, 8000);
+            renderAnexosUploadsPreview();
+            updateEmptyFlags();
+            triggerSave();
+        });
+    });
+
+    const undoBtn = anexosUploadsList.querySelector('button[data-action="undo-remove"]');
+    if (undoBtn) {
+        undoBtn.addEventListener('click', () => {
+            if (!lastRemovedAnexo) return;
+            anexosToRemove = anexosToRemove.filter(url => url !== lastRemovedAnexo);
+            lastRemovedAnexo = null;
+            if (undoAnexoTimeoutId) {
+                clearTimeout(undoAnexoTimeoutId);
+                undoAnexoTimeoutId = null;
+            }
+            renderAnexosUploadsPreview();
+            updateEmptyFlags();
+            triggerSave();
+        });
+    }
 
     anexosUploadsList.querySelectorAll('button[data-action="remove-pending"]').forEach(button => {
         button.addEventListener('click', () => {
@@ -3634,7 +3731,8 @@ async function exportToPDF(ropData) {
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(10);
         doc.setTextColor(0, 0, 0);
-        doc.text('Sem envolvidos', contentX, y);
+        const paddingY = 8;
+        doc.text('Sem envolvidos', pageWidth / 2, y + paddingY, { align: 'center' });
         y += 15;
     }
 
@@ -3749,7 +3847,8 @@ async function exportToPDF(ropData) {
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(10);
         doc.setTextColor(0, 0, 0);
-        doc.text('Sem objetos apreendidos', contentX, y);
+        const paddingY = 8;
+        doc.text('Sem objetos apreendidos', pageWidth / 2, y + paddingY, { align: 'center' });
         y += 15;
     }
 
@@ -3825,7 +3924,8 @@ async function exportToPDF(ropData) {
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(10);
         doc.setTextColor(0, 0, 0);
-        doc.text('Sem imagens anexadas', contentX, y);
+        const paddingY = 8;
+        doc.text('Sem imagens anexadas', pageWidth / 2, y + paddingY, { align: 'center' });
         y += 15;
     }
 
@@ -4027,7 +4127,7 @@ async function exportToPDF(ropData) {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7);
     doc.setTextColor(70, 70, 70);
-    doc.text('Gestão de Relatórios de Ocorrência (ROP)', pageWidth / 2, y - 8, { align: 'center' });
+    doc.text('Gestão de Relatórios de Ocorrência Policial (ROP)', pageWidth / 2, y - 8, { align: 'center' });
     doc.setFontSize(6);
     doc.text(footerInfoLine1, pageWidth / 2, y - 5, { align: 'center' });
     doc.text(footerInfoLine2, pageWidth / 2, y - 2, { align: 'center' });
