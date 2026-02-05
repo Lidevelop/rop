@@ -278,7 +278,7 @@
             <div class="manager-filters">
                 <div class="form-group">
                     <label for="logsFilterText"><i class="fas fa-search"></i> Busca</label>
-                    <input type="text" id="logsFilterText" placeholder="Usuário, ação, ROP, matrícula...">
+                    <input type="text" id="logsFilterText" placeholder="Usuário, ação, ROP, descrição...">
                 </div>
                 <div class="form-group">
                     <label for="logsPageSize"><i class="fas fa-list"></i> Itens por página</label>
@@ -289,6 +289,13 @@
                         <option value="100">100</option>
                     </select>
                 </div>
+                <div class="form-group">
+                    <label for="refreshLogs"><i class="fas fa-sync-alt"></i> Atualizar</label>
+                    <button class="btn-action btn-export" id="refreshLogs" type="button">
+                        <i class="fas fa-rotate"></i>
+                        Recarregar
+                    </button>
+                </div>
             </div>
             <div class="table-responsive">
                 <table id="logsTable">
@@ -297,7 +304,7 @@
                             <th>Data/Hora</th>
                             <th>Ação</th>
                             <th>Usuário</th>
-                            <th>Matrícula</th>
+                            <th>Descrição</th>
                             <th>ROP</th>
                         </tr>
                     </thead>

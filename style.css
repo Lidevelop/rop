@@ -740,6 +740,31 @@ body {
     margin-left: auto;
 }
 
+.operation-attachments {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.3rem 0.55rem;
+    border-radius: 999px;
+    font-weight: 700;
+    font-size: 0.8rem;
+    border: 1px solid transparent;
+    color: var(--primary-color);
+    background: rgba(30, 58, 95, 0.08);
+}
+
+.operation-attachments.has {
+    background: rgba(40, 167, 69, 0.12);
+    color: #1f7a36;
+    border-color: rgba(40, 167, 69, 0.3);
+}
+
+.operation-attachments.none {
+    background: rgba(220, 53, 69, 0.08);
+    color: #a42834;
+    border-color: rgba(220, 53, 69, 0.2);
+}
+
 .highlight-pill {
     display: inline-flex;
     align-items: center;
@@ -1603,6 +1628,34 @@ footer p:first-child {
         gap: 1.2rem;
         text-align: center;
         padding: 1rem;
+    }
+
+    input,
+    select,
+    textarea,
+    button {
+        font-size: 16px;
+    }
+
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+        min-height: 48px;
+        padding: 0.7rem 0.9rem;
+    }
+
+    .manager-filters {
+        grid-template-columns: 1fr;
+    }
+
+    #destinatario {
+        width: 100%;
+        min-width: 0;
+    }
+
+    .inline-field {
+        flex-direction: column;
+        align-items: stretch;
     }
 
     .form-grid {

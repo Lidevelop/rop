@@ -16,11 +16,13 @@ let auth = null;
 let db = null;
 let storage = null;
 let currentRopId = null;
+let currentRopOriginal = null;
 let ropsCache = [];
 let isLoadingRops = false;
 let forcedRopIdFilter = null;
 const ROPS_PAGE_SIZE = 6;
 let ropsCurrentPage = 1;
+const ROP_EDIT_WINDOW_MS = 5 * 60 * 60 * 1000;
 
 const CACHE_TTL = {
     warNames: 30 * 60 * 1000,
@@ -282,6 +284,7 @@ const logsTableBody = document.getElementById('logsTableBody');
 const logsFilterText = document.getElementById('logsFilterText');
 const logsPageSizeSelect = document.getElementById('logsPageSize');
 const logsPagination = document.getElementById('logsPagination');
+const refreshLogsBtn = document.getElementById('refreshLogs');
 const createWarNameBtn = document.getElementById('createWarNameBtn');
 const warNameModal = document.getElementById('warNameModal');
 const warNameForm = document.getElementById('warNameForm');
@@ -453,7 +456,8 @@ function initFirebase() {
             await loadDelegaciasList(false);
             await loadRopsList(false);
             if (!hasActiveSession) {
-                await logEvent('login');
+                const userName = getCurrentUserDisplayName();
+                await logEvent('login', {}, `Usuário ${userName} logou.`);
             }
             startIdleLogoutTimer();
         } else {
@@ -673,6 +677,7 @@ function initializeEventListeners() {
     if (saveDbBtn) {
         saveDbBtn.addEventListener('click', async () => {
             if (!auth || !auth.currentUser) return;
+            await ensureRegistroNumeroFilled();
             if (!validateRequiredFields()) {
                 saveStatus.textContent = 'Preencha os campos obrigatórios antes de salvar.';
                 return;
@@ -750,6 +755,15 @@ function initializeEventListeners() {
             loadLogsList(false);
         }
     });
+
+    if (refreshLogsBtn) {
+        refreshLogsBtn.addEventListener('click', () => {
+            if (!isAdmin) return;
+            logsFilterText.value = '';
+            logsCurrentPage = 1;
+            loadLogsList(true);
+        });
+    }
 
     [filterText, filterDateFrom, filterDateTo].forEach(input => {
         if (!input) return;
@@ -992,10 +1006,17 @@ function bindParteInputMasks() {
     if (parteCpf) {
         parteCpf.addEventListener('input', () => {
             parteCpf.value = maskCPF(parteCpf.value);
+            const isValid = validateParteCpfInput();
+            if (!isValid && (parteCpf.value || '').replace(/\D/g, '').length >= 11) {
+                parteCpf.reportValidity();
+            }
         });
         parteCpf.addEventListener('blur', () => {
             // Normalize mask on blur
             parteCpf.value = maskCPF(parteCpf.value);
+            if (!validateParteCpfInput()) {
+                parteCpf.reportValidity();
+            }
         });
     }
     if (parteTelefone) {
@@ -1006,6 +1027,25 @@ function bindParteInputMasks() {
             parteTelefone.value = maskTelefone(parteTelefone.value);
         });
     }
+}
+
+function validateParteCpfInput() {
+    if (!parteCpf) return true;
+    const cpfRaw = (parteCpf.value || '').replace(/\D/g, '');
+    if (!cpfRaw) {
+        parteCpf.setCustomValidity('');
+        return true;
+    }
+    if (cpfRaw.length < 11) {
+        parteCpf.setCustomValidity('CPF incompleto.');
+        return false;
+    }
+    if (cpfRaw.length !== 11 || !isValidCPF(cpfRaw)) {
+        parteCpf.setCustomValidity('CPF inválido.');
+        return false;
+    }
+    parteCpf.setCustomValidity('');
+    return true;
 }
 
 function openPasswordModal() {
@@ -1423,6 +1463,15 @@ function saveFormData() {
     saveStatus.textContent = 'Salvo automaticamente';
 }
 
+async function ensureRegistroNumeroFilled() {
+    if (!registroNumeroInput || !registroNumeroDisplay) return;
+    const currentValue = (registroNumeroInput.value || '').trim();
+    const displayValue = (registroNumeroDisplay.textContent || '').trim();
+    if (!currentRopId && (!currentValue || currentValue === '--' || displayValue === '--')) {
+        await loadNextRopNumberPreview();
+    }
+}
+
 function loadFormData() {
     const savedData = localStorage.getItem('pmuRopForm');
     if (!savedData) return;
@@ -1483,6 +1532,7 @@ function clearForm() {
 
     localStorage.removeItem('pmuRopForm');
     currentRopId = null;
+    currentRopOriginal = null;
     confirmationModal.style.display = 'none';
     updateLastSavedTime();
     saveStatus.textContent = 'Formulário limpo';
@@ -1625,6 +1675,7 @@ async function saveRopToFirebase(formData) {
         let docRef = null;
         const isNew = !currentRopId;
         let registroNumeroFinal = formData.registroNumero || '';
+        const previousSnapshot = isNew ? null : (currentRopOriginal ? { ...currentRopOriginal } : null);
 
         const participantMatriculas = buildParticipantMatriculas(formData);
         const basePayload = {
@@ -1689,7 +1740,25 @@ async function saveRopToFirebase(formData) {
             await loadNextRopNumberPreview();
         }
 
-        await logEvent('rop_saved', { ropId: currentRopId, registroNumero: registroNumeroFinal || '' });
+        const userName = getCurrentUserDisplayName();
+        if (isNew) {
+            await logEvent(
+                'rop_saved',
+                { ropId: currentRopId, registroNumero: registroNumeroFinal || '' },
+                `Usuário ${userName} registrou o ROP ${registroNumeroFinal || currentRopId}.`
+            );
+        } else {
+            const currentSnapshot = normalizeRopForCompare(formData);
+            const fieldsChanged = getRopChangedFields(previousSnapshot || {}, currentSnapshot);
+            const descriptionSuffix = fieldsChanged.length
+                ? `Campos alterados: ${fieldsChanged.join(', ')}.`
+                : 'Nenhum campo alterado.';
+            await logEvent(
+                'rop_updated',
+                { ropId: currentRopId, registroNumero: registroNumeroFinal || '', fieldsChanged },
+                `Usuário ${userName} editou o ROP ${registroNumeroFinal || currentRopId}. ${descriptionSuffix}`
+            );
+        }
         saveStatus.textContent = 'ROP salvo com sucesso!';
         return { id: currentRopId, isNew };
     } catch (error) {
@@ -1741,7 +1810,7 @@ async function loadNextRopNumberPreview() {
     }
 }
 
-async function logEvent(action, metadata = {}) {
+async function logEvent(action, metadata = {}, descricao = '') {
     if (!db || !auth || !auth.currentUser) return;
     try {
         await db.collection('logs').add({
@@ -1749,13 +1818,104 @@ async function logEvent(action, metadata = {}) {
             userId: auth.currentUser.uid,
             userEmail: auth.currentUser.email || '',
             nomeGuerra: currentUserProfile?.nomeGuerra || '',
-            matricula: currentUserProfile?.matricula || '',
             metadata,
+            descricao: descricao || String(metadata?.descricao || ''),
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
     } catch (error) {
         console.error('Erro ao salvar log:', error);
     }
+}
+
+function getCurrentUserDisplayName() {
+    return (currentUserProfile?.nomeGuerra || auth?.currentUser?.email || 'Usuário').trim();
+}
+
+function normalizeRopForCompare(raw) {
+    const anexosUrls = normalizeRopAnexosUrls(raw);
+    const normalizeArray = (items) => {
+        if (!Array.isArray(items)) return [];
+        const normalized = items.map(item => sortObjectKeys(item || {}));
+        return normalized.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+    };
+    return {
+        registroNumero: raw?.registroNumero || '',
+        dataFato: raw?.dataFato || '',
+        horaFato: raw?.horaFato || '',
+        destinatario: raw?.destinatario || '',
+        natureza: raw?.natureza || '',
+        tipoDelito: raw?.tipoDelito || '',
+        localOcorrencia: raw?.localOcorrencia || '',
+        uf: raw?.uf || '',
+        cidade: raw?.cidade || '',
+        numero: raw?.numero || '',
+        bairro: raw?.bairro || '',
+        relato: raw?.relato || '',
+        postoServico: raw?.postoServico || '',
+        turno: raw?.turno || '',
+        partes: normalizeArray(raw?.partes),
+        apreensoes: normalizeArray(raw?.apreensoes),
+        agentes: normalizeArray(raw?.agentes),
+        anexosUrls,
+        delegacia: raw?.delegacia || '',
+        noPartesFlag: Boolean(raw?.noPartesFlag),
+        noApreensoesFlag: Boolean(raw?.noApreensoesFlag),
+        noAnexosFlag: Boolean(raw?.noAnexosFlag)
+    };
+}
+
+function normalizeRopAnexosUrls(raw) {
+    if (Array.isArray(raw?.anexosUrls)) return raw.anexosUrls.filter(Boolean);
+    if (typeof raw?.anexos === 'string') {
+        return raw.anexos.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+    }
+    return [];
+}
+
+function sortObjectKeys(value) {
+    if (Array.isArray(value)) return value.map(sortObjectKeys);
+    if (value && typeof value === 'object') {
+        return Object.keys(value).sort().reduce((acc, key) => {
+            acc[key] = sortObjectKeys(value[key]);
+            return acc;
+        }, {});
+    }
+    return value;
+}
+
+const ROP_FIELD_LABELS = {
+    registroNumero: 'Número do registro',
+    dataFato: 'Data do fato',
+    horaFato: 'Hora do fato',
+    destinatario: 'Delegacia',
+    natureza: 'Natureza',
+    tipoDelito: 'Tipo de delito',
+    localOcorrencia: 'Local da ocorrência',
+    uf: 'UF',
+    cidade: 'Cidade',
+    numero: 'Número',
+    bairro: 'Bairro',
+    relato: 'Relato',
+    postoServico: 'Posto de serviço',
+    turno: 'Turno',
+    partes: 'Envolvidos',
+    apreensoes: 'Apreensões',
+    agentes: 'Agentes',
+    anexosUrls: 'Anexos',
+    delegacia: 'Delegacia (ROP)',
+    noPartesFlag: 'Flag sem envolvidos',
+    noApreensoesFlag: 'Flag sem apreensões',
+    noAnexosFlag: 'Flag sem anexos'
+};
+
+function getRopChangedFields(previous, current) {
+    const prev = normalizeRopForCompare(previous || {});
+    const next = normalizeRopForCompare(current || {});
+    return Object.keys(ROP_FIELD_LABELS).filter(key => {
+        const prevValue = JSON.stringify(sortObjectKeys(prev[key]));
+        const nextValue = JSON.stringify(sortObjectKeys(next[key]));
+        return prevValue !== nextValue;
+    }).map(key => ROP_FIELD_LABELS[key]);
 }
 
 async function loadRopsList(force = false) {
@@ -1973,6 +2133,71 @@ function buildAgentesGroupedLine(agentes) {
         .join(' | ');
 }
 
+function getRopAttachmentsUrls(rop) {
+    if (!rop) return [];
+    if (Array.isArray(rop.anexosUrls)) return rop.anexosUrls.filter(Boolean);
+    if (typeof rop.anexos === 'string') {
+        return rop.anexos.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+    }
+    return [];
+}
+
+function hasRopAttachments(rop) {
+    return getRopAttachmentsUrls(rop).length > 0;
+}
+
+function getAttachmentFilename(url) {
+    try {
+        const decoded = decodeURIComponent(url);
+        const withoutQuery = decoded.split('?')[0];
+        const parts = withoutQuery.split('/');
+        return parts[parts.length - 1] || 'anexo';
+    } catch {
+        return 'anexo';
+    }
+}
+
+async function triggerAttachmentDownload(url, index = 0) {
+    if (!url) return;
+    const filename = getAttachmentFilename(url);
+    try {
+        const response = await fetch(url, { mode: 'cors' });
+        if (!response.ok) throw new Error('download_failed');
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = objectUrl;
+        link.download = filename;
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        setTimeout(() => {
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(objectUrl);
+        }, 50 + index * 120);
+    } catch (error) {
+        console.error('Falha ao baixar anexo:', error);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        setTimeout(() => {
+            link.click();
+            link.remove();
+        }, 50 + index * 120);
+    }
+}
+
+function downloadRopAttachments(rop) {
+    const urls = getRopAttachmentsUrls(rop);
+    if (!urls.length) return;
+    const registro = rop?.registroNumero || rop?.id || '';
+    const shouldDownload = window.confirm(`Deseja baixar ${urls.length} anexo(s) do ROP ${registro}?`);
+    if (!shouldDownload) return;
+    urls.forEach((url, index) => triggerAttachmentDownload(url, index));
+}
+
 function renderRopsList(rops) {
     if (!rops.length) {
         ropsList.innerHTML = '<div class="operation-empty">Nenhum ROP encontrado.</div>';
@@ -2010,6 +2235,13 @@ function renderRopsList(rops) {
         const hasUpdate = Boolean(rop.updatedAt);
         const updatedAtText = hasUpdate ? formatDateTime(rop.updatedAt) : '—';
         const updatedByText = hasUpdate ? (rop.updatedBy?.nomeGuerra || 'Não informado') : '—';
+        const hasAnexos = hasRopAttachments(rop);
+        const anexosBadge = `
+            <div class="operation-attachments ${hasAnexos ? 'has' : 'none'}" title="${hasAnexos ? 'ROP com anexos' : 'ROP sem anexos'}">
+                <i class="fas ${hasAnexos ? 'fa-paperclip' : 'fa-circle-xmark'}"></i>
+                ${hasAnexos ? 'Com anexos' : 'Sem anexos'}
+            </div>
+        `;
 
         const card = document.createElement('div');
         card.className = 'operation-card';
@@ -2021,6 +2253,7 @@ function renderRopsList(rops) {
                         <span class="highlight-pill"><i class="fas ${h.icon}"></i> ${h.label}: ${escapeHtml(h.value)}</span>
                     `).join('')}
                 </div>
+                ${anexosBadge}
                 ${matchBadge}
             </div>
             <div class="operation-meta">
@@ -2039,6 +2272,11 @@ function renderRopsList(rops) {
                 <button class="btn-small" data-action="pdf" data-id="${rop.id}">
                     <i class="fas fa-file-pdf"></i> Gerar PDF
                 </button>
+                ${hasAnexos ? `
+                    <button class="btn-small" data-action="attachments" data-id="${rop.id}">
+                        <i class="fas fa-paperclip"></i> Anexos
+                    </button>
+                ` : ''}
                 ${isAdmin ? `
                     <button class="btn-small btn-danger" data-action="delete" data-id="${rop.id}">
                         <i class="fas fa-trash"></i> Excluir
@@ -2079,6 +2317,15 @@ function renderRopsList(rops) {
         });
     });
 
+    ropsList.querySelectorAll('button[data-action="attachments"]').forEach(button => {
+        button.addEventListener('click', () => {
+            const id = button.getAttribute('data-id');
+            const rop = ropsCache.find(item => item.id === id);
+            if (!rop) return;
+            downloadRopAttachments(rop);
+        });
+    });
+
     ropsList.querySelectorAll('button[data-action="delete"]').forEach(button => {
         button.addEventListener('click', () => {
             const id = button.getAttribute('data-id');
@@ -2094,8 +2341,7 @@ function isEditBlockedByDate(rop) {
     if (!createdAt) return false;
     const now = new Date();
     const diffMs = now.getTime() - createdAt.getTime();
-    const twoDaysMs = 2 * 24 * 60 * 60 * 1000;
-    return diffMs >= twoDaysMs;
+    return diffMs >= ROP_EDIT_WINDOW_MS;
 }
 
 function getRopEditPermission(rop) {
@@ -2104,10 +2350,10 @@ function getRopEditPermission(rop) {
     const currentUid = auth?.currentUser?.uid || '';
     const isOwner = createdByUid && currentUid && createdByUid === currentUid;
     if (!isOwner) {
-        return { allowed: false, message: 'Só quem criou poderá editar e no máximo em até dois dias.' };
+        return { allowed: false, message: 'Só quem criou poderá editar e no máximo em até 5 horas.' };
     }
     if (isEditBlockedByDate(rop)) {
-        return { allowed: false, message: 'Só quem criou poderá editar e no máximo em até dois dias.' };
+        return { allowed: false, message: 'Só quem criou poderá editar e no máximo em até 5 horas.' };
     }
     return { allowed: true, message: '' };
 }
@@ -2189,6 +2435,7 @@ async function loadRopById(id) {
             }
             currentRopId = docSnap.id;
             applyFormData(data);
+            currentRopOriginal = normalizeRopForCompare(data);
             setActiveAppView('form');
             saveStatus.textContent = 'ROP carregado';
         }
@@ -2204,10 +2451,13 @@ async function deleteRopById(id) {
     if (!shouldDelete) return;
     try {
         await db.collection('rops').doc(id).delete();
-        await logEvent('rop_deleted', {
-            ropId: id,
-            registroNumero: rop?.registroNumero || ''
-        });
+        const registroNumero = rop?.registroNumero || '';
+        const userName = getCurrentUserDisplayName();
+        await logEvent(
+            'rop_deleted',
+            { ropId: id, registroNumero },
+            `Usuário ${userName} excluiu o ROP ${registroNumero || id}.`
+        );
         ropsCache = ropsCache.filter(item => item.id !== id);
         applyRopsFilter();
     } catch (error) {
@@ -2333,13 +2583,11 @@ function saveParteFromModal() {
         return;
     }
 
-    const cpfRaw = (parteCpf?.value || '').replace(/\D/g, '');
-    if (cpfRaw) {
-        if (cpfRaw.length !== 11 || !isValidCPF(cpfRaw)) {
-            alert('CPF inválido.');
-            return;
-        }
+    if (!validateParteCpfInput()) {
+        alert('CPF inválido.');
+        return;
     }
+    const cpfRaw = (parteCpf?.value || '').replace(/\D/g, '');
 
     if (parteNascimento?.value) {
         const birth = new Date(`${parteNascimento.value}T00:00:00`);
@@ -2510,6 +2758,38 @@ function handleAddAnexoClick() {
     anexosFileInput.click();
 }
 
+async function compressImageForUpload(file, maxDimension = 1600, quality = 0.8) {
+    if (!file || !file.type || !file.type.startsWith('image/')) return file;
+    if (file.type === 'image/gif') return file;
+
+    const imageBitmap = await createImageBitmap(file).catch(() => null);
+    if (!imageBitmap) return file;
+
+    const { width, height } = imageBitmap;
+    if (!width || !height) return file;
+
+    let targetWidth = width;
+    let targetHeight = height;
+    if (Math.max(width, height) > maxDimension) {
+        const ratio = maxDimension / Math.max(width, height);
+        targetWidth = Math.round(width * ratio);
+        targetHeight = Math.round(height * ratio);
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return file;
+    ctx.drawImage(imageBitmap, 0, 0, targetWidth, targetHeight);
+
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', quality));
+    if (!blob) return file;
+
+    const newName = (file.name || 'imagem').replace(/\.[^.]+$/, '') + '.jpg';
+    return new File([blob], newName, { type: 'image/jpeg' });
+}
+
 async function uploadAnexoImage(file) {
     if (!file) return;
 
@@ -2523,8 +2803,21 @@ async function uploadAnexoImage(file) {
         return;
     }
 
-    const previewUrl = URL.createObjectURL(file);
-    anexosPending.push({ id: Date.now() + Math.random(), file, previewUrl });
+    let preparedFile = file;
+    try {
+        preparedFile = await compressImageForUpload(file);
+    } catch (error) {
+        console.error('Falha ao comprimir imagem:', error);
+        preparedFile = file;
+    }
+
+    const previewUrl = URL.createObjectURL(preparedFile);
+    anexosPending.push({
+        id: Date.now() + Math.random(),
+        file: preparedFile,
+        previewUrl,
+        fileName: preparedFile.name || file.name
+    });
     renderAnexosUploadsPreview();
     updateEmptyFlags();
 }
@@ -2560,7 +2853,8 @@ async function uploadPendingAnexosToStorage(ropId, shouldUpdateMeta = true) {
         for (const item of anexosPending) {
             const file = item.file;
             if (!file) continue;
-            const safeName = (file.name || 'imagem').replace(/[^a-zA-Z0-9._-]/g, '_');
+            const fileName = item.fileName || file.name || 'imagem';
+            const safeName = String(fileName).replace(/[^a-zA-Z0-9._-]/g, '_');
             const path = `anexos/${ropId}/${uid}/${Date.now()}_${safeName}`;
             const ref = storage.ref().child(path);
 
@@ -3018,13 +3312,19 @@ async function createNewUser() {
             matricula: userCreateRegistration.value.trim(),
             tipo: userCreateType.value
         }, { merge: true });
-        await logEvent('user_created', {
-            userId: newUser.uid,
-            email: userCreateEmail.value.trim(),
-            nomeGuerra: userCreateWarName.value.trim(),
-            matricula: userCreateRegistration.value.trim(),
-            tipo: userCreateType.value
-        });
+        const creatorName = getCurrentUserDisplayName();
+        const createdName = userCreateWarName.value.trim() || userCreateEmail.value.trim();
+        await logEvent(
+            'user_created',
+            {
+                userId: newUser.uid,
+                email: userCreateEmail.value.trim(),
+                nomeGuerra: userCreateWarName.value.trim(),
+                matricula: userCreateRegistration.value.trim(),
+                tipo: userCreateType.value
+            },
+            `Usuário ${creatorName} criou o usuário ${createdName}.`
+        );
         await secondaryAuth.signOut();
         closeUserCreateModal();
         loadUsersList(true);
@@ -3068,12 +3368,18 @@ async function sendPasswordResetForUser() {
     }
     try {
         await auth.sendPasswordResetEmail(email);
-        await logEvent('user_password_reset', {
-            email,
-            userId: pendingResetUser.id || '',
-            nomeGuerra: pendingResetUser.nomeGuerra || '',
-            matricula: pendingResetUser.matricula || ''
-        });
+        const actorName = getCurrentUserDisplayName();
+        const targetName = pendingResetUser?.nomeGuerra || email || 'usuário';
+        await logEvent(
+            'user_password_reset',
+            {
+                email,
+                userId: pendingResetUser.id || '',
+                nomeGuerra: pendingResetUser.nomeGuerra || '',
+                matricula: pendingResetUser.matricula || ''
+            },
+            `Usuário ${actorName} enviou reset de senha para ${targetName}.`
+        );
         closeResetPasswordModal();
         alert('E-mail de reset enviado com sucesso.');
     } catch (error) {
@@ -3101,12 +3407,18 @@ async function saveEditedUserProfile() {
             matricula: userEditRegistration.value.trim(),
             tipo: userEditType.value
         }, { merge: true });
-        await logEvent('user_updated', {
-            userId: editingUserId,
-            nomeGuerra: userEditWarName.value.trim(),
-            matricula: userEditRegistration.value.trim(),
-            tipo: userEditType.value
-        });
+        const editorName = getCurrentUserDisplayName();
+        const editedName = userEditWarName.value.trim() || 'usuário';
+        await logEvent(
+            'user_updated',
+            {
+                userId: editingUserId,
+                nomeGuerra: userEditWarName.value.trim(),
+                matricula: userEditRegistration.value.trim(),
+                tipo: userEditType.value
+            },
+            `Usuário ${editorName} atualizou o usuário ${editedName}.`
+        );
         closeUserEditModal();
         loadUsersList(true);
     } catch (error) {
@@ -3121,12 +3433,18 @@ async function deleteUserProfile(user) {
     if (!shouldDelete) return;
     try {
         await db.collection('users').doc(user.id).delete();
-        await logEvent('user_deleted', {
-            userId: user.id,
-            email: user.email || '',
-            nomeGuerra: user.nomeGuerra || '',
-            matricula: user.matricula || ''
-        });
+        const removerName = getCurrentUserDisplayName();
+        const removedName = user.nomeGuerra || user.email || 'usuário';
+        await logEvent(
+            'user_deleted',
+            {
+                userId: user.id,
+                email: user.email || '',
+                nomeGuerra: user.nomeGuerra || '',
+                matricula: user.matricula || ''
+            },
+            `Usuário ${removerName} excluiu o usuário ${removedName}.`
+        );
         loadUsersList(true);
     } catch (error) {
         console.error(error);
@@ -3307,7 +3625,7 @@ async function loadLogsList(force = false) {
 function applyLogsFilter() {
     const textValue = logsFilterText ? logsFilterText.value.trim().toLowerCase() : '';
     const filtered = logsCache.filter(entry => {
-        const blob = `${entry.action || ''} ${entry.userEmail || ''} ${entry.nomeGuerra || ''} ${entry.matricula || ''} ${entry.metadata?.registroNumero || ''} ${entry.metadata?.ropId || ''}`.toLowerCase();
+        const blob = `${entry.action || ''} ${entry.userEmail || ''} ${entry.nomeGuerra || ''} ${entry.descricao || ''} ${entry.metadata?.registroNumero || ''} ${entry.metadata?.ropId || ''}`.toLowerCase();
         return textValue ? blob.includes(textValue) : true;
     });
     renderLogsTable(filtered);
@@ -3331,15 +3649,33 @@ function renderLogsTable(entries) {
         const row = document.createElement('tr');
         row.innerHTML = `
             <td>${formatDateTime(entry.createdAt)}</td>
-            <td>${entry.action === 'login' ? 'Login' : entry.action === 'rop_saved' ? 'Registro de ROP' : entry.action}</td>
+            <td>${getLogActionLabel(entry.action)}</td>
             <td>${entry.nomeGuerra || entry.userEmail || '-'}</td>
-            <td>${entry.matricula || '-'}</td>
+            <td>${escapeHtml(entry.descricao || '-')}</td>
             <td>${entry.metadata?.registroNumero || entry.metadata?.ropId || '-'}</td>
         `;
         logsTableBody.appendChild(row);
     });
 
     renderLogsPagination(totalPages);
+}
+
+function getLogActionLabel(action) {
+    const map = {
+        login: 'Login',
+        rop_saved: 'Registro de ROP',
+        rop_updated: 'Edição de ROP',
+        rop_deleted: 'Exclusão de ROP',
+        rop_pdf_generated: 'PDF do ROP',
+        user_created: 'Cadastro de usuário',
+        user_updated: 'Atualização de usuário',
+        user_deleted: 'Exclusão de usuário',
+        user_password_reset: 'Reset de senha',
+        agent_created: 'Cadastro de agente',
+        agent_updated: 'Atualização de agente',
+        agent_deleted: 'Exclusão de agente'
+    };
+    return map[action] || action || '-';
 }
 
 function renderLogsPagination(totalPages) {
@@ -3411,11 +3747,17 @@ async function saveWarNameEntry() {
                 matricula: warNameRegistration.value.trim(),
                 status: warNameStatus.value
             }, { merge: true });
-            await logEvent('agent_updated', {
-                warNameId: editingWarNameId,
-                nomeGuerra: warNameValue.value.trim(),
-                matricula: warNameRegistration.value.trim()
-            });
+            const actorName = getCurrentUserDisplayName();
+            const agentName = warNameValue.value.trim() || 'agente';
+            await logEvent(
+                'agent_updated',
+                {
+                    warNameId: editingWarNameId,
+                    nomeGuerra: warNameValue.value.trim(),
+                    matricula: warNameRegistration.value.trim()
+                },
+                `Usuário ${actorName} atualizou o agente ${agentName}.`
+            );
         } else {
             await db.collection('warNames').add({
                 classe: warNameClass.value,
@@ -3423,10 +3765,16 @@ async function saveWarNameEntry() {
                 matricula: warNameRegistration.value.trim(),
                 status: warNameStatus.value
             });
-            await logEvent('agent_created', {
-                nomeGuerra: warNameValue.value.trim(),
-                matricula: warNameRegistration.value.trim()
-            });
+            const creatorName = getCurrentUserDisplayName();
+            const agentName = warNameValue.value.trim() || 'agente';
+            await logEvent(
+                'agent_created',
+                {
+                    nomeGuerra: warNameValue.value.trim(),
+                    matricula: warNameRegistration.value.trim()
+                },
+                `Usuário ${creatorName} cadastrou o agente ${agentName}.`
+            );
         }
         closeWarNameModal();
         loadWarNamesList(true);
@@ -3443,12 +3791,18 @@ async function toggleWarNameStatus(id) {
     const nextStatus = entry.status === 'inativo' ? 'ativo' : 'inativo';
     try {
         await db.collection('warNames').doc(id).set({ status: nextStatus }, { merge: true });
-        await logEvent('agent_updated', {
-            warNameId: id,
-            nomeGuerra: entry.nomeGuerra || '',
-            matricula: entry.matricula || '',
-            status: nextStatus
-        });
+        const actorName = getCurrentUserDisplayName();
+        const agentName = entry.nomeGuerra || 'agente';
+        await logEvent(
+            'agent_updated',
+            {
+                warNameId: id,
+                nomeGuerra: entry.nomeGuerra || '',
+                matricula: entry.matricula || '',
+                status: nextStatus
+            },
+            `Usuário ${actorName} alterou o status do agente ${agentName} para ${nextStatus}.`
+        );
         loadWarNamesList(true);
     } catch (error) {
         console.error(error);
@@ -3463,11 +3817,17 @@ async function deleteWarNameEntry(id) {
     if (!shouldDelete) return;
     try {
         await db.collection('warNames').doc(id).delete();
-        await logEvent('agent_deleted', {
-            warNameId: id,
-            nomeGuerra: entry.nomeGuerra || '',
-            matricula: entry.matricula || ''
-        });
+        const removerName = getCurrentUserDisplayName();
+        const agentName = entry.nomeGuerra || 'agente';
+        await logEvent(
+            'agent_deleted',
+            {
+                warNameId: id,
+                nomeGuerra: entry.nomeGuerra || '',
+                matricula: entry.matricula || ''
+            },
+            `Usuário ${removerName} excluiu o agente ${agentName}.`
+        );
         loadWarNamesList(true);
     } catch (error) {
         console.error(error);
@@ -3497,11 +3857,17 @@ async function sendPasswordResetForAgent(entry) {
         }
 
         await auth.sendPasswordResetEmail(email);
-        await logEvent('user_password_reset', {
-            email,
-            matricula,
-            nomeGuerra: entry?.nomeGuerra || ''
-        });
+        const actorName = getCurrentUserDisplayName();
+        const targetName = entry?.nomeGuerra || email || 'agente';
+        await logEvent(
+            'user_password_reset',
+            {
+                email,
+                matricula,
+                nomeGuerra: entry?.nomeGuerra || ''
+            },
+            `Usuário ${actorName} enviou reset de senha para ${targetName}.`
+        );
         alert('E-mail de reset enviado com sucesso.');
     } catch (error) {
         console.error(error);
@@ -4304,10 +4670,13 @@ async function exportToPDF(ropData) {
         doc.text(`Página ${i} de ${totalPages}`, pageWidth - margin, pageHeight - 4, { align: 'right' });
     }
 
-    await logEvent('rop_pdf_generated', {
-        ropId: ropData.id || '',
-        registroNumero: ropData.registroNumero || ''
-    });
+    const actorName = getCurrentUserDisplayName();
+    const registroNumero = ropData.registroNumero || '';
+    await logEvent(
+        'rop_pdf_generated',
+        { ropId: ropData.id || '', registroNumero },
+        `Usuário ${actorName} gerou o PDF do ROP ${registroNumero || ropData.id || ''}.`
+    );
 
     // Salva o PDF
     const cleanRegistro = (ropData.registroNumero || 'sem_registro').replace(/[^a-zA-Z0-9]/g, '_');
