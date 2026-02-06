@@ -4372,7 +4372,11 @@ async function exportToPDF(ropData) {
     drawSectionLines(sectionTopY, y);
 
     // V - IMAGENS DO OCORRIDO
-    if (y > pageHeight - 50) {
+    const anexosList = collectAnexosUrls(ropData);
+    const anexosRowHeight = 55;
+    const anexosEmptyBlockHeight = 15;
+    const anexosMinHeight = sectionHeaderHeight + (anexosList.length > 0 ? anexosRowHeight : anexosEmptyBlockHeight);
+    if (y + anexosMinHeight > pageHeight - margin) {
         addPageWithBorders();
         y = margin + 5;
     }
@@ -4380,12 +4384,10 @@ async function exportToPDF(ropData) {
     sectionHeader = drawSectionHeader('V - IMAGENS DO OCORRIDO');
     sectionTopY = sectionHeader.headerTop;
 
-    const anexosList = collectAnexosUrls(ropData);
-
     if (anexosList.length > 0) {
         const gap = 6;
         const colWidth = (contentMaxWidth - gap) / 2;
-        const rowHeight = 55;
+        const rowHeight = anexosRowHeight;
         let col = 0;
         let cursorX = contentX;
         let cursorY = y;
